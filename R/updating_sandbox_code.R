@@ -119,145 +119,152 @@ library(randomForest); library(doParallel); library(caret); library(parallel); l
 #Functions
 ################################################################################
 
-runpred <- function(mod, var, stepper, dat){
-  dat[[var]] <- dat[[var]] + stepper
-  pred <- predict(mod, dat)
-  true <- dat$y
-  onecount <- length(which(pred == '1')) / length(true)
-  acc <- length(which(pred == true)) / length(true)
-  return(c(onecount, acc))
-}
+{
+  runpred <- function(mod, var, stepper, dat){
+    dat[[var]] <- dat[[var]] + stepper
+    pred <- predict(mod, dat)
+    true <- dat$y
+    onecount <- length(which(pred == '1')) / length(true)
+    acc <- length(which(pred == true)) / length(true)
+    return(c(onecount, acc))
+  }
 
-runpred.bin <- function(mod, var, stepper, dat){
-  dat[[var]] <- dat[[var]] + stepper
-  pred <- predict(mod, dat)
-  true <- dat$y
-  dif <- pred - true
-  return(dif)
-}
+  runpred.bin <- function(mod, var, stepper, dat){
+    dat[[var]] <- dat[[var]] + stepper
+    pred <- predict(mod, dat)
+    true <- dat$y
+    dif <- pred - true
+    return(dif)
+  }
 
-acc.imp <- function(w, wo, w.dat, wo.dat, y){
-  pred.w <- predict(w, w.dat)
-  pred.wo <- predict(wo, wo.dat)
-  w.acc <- sum(1 * (pred.w == y)) / length(y)
-  wo.acc <- sum(1 * (pred.wo == y)) / length(y)
-  imp.list <- list(w.acc = w.acc, wo.acc = wo.acc, dif = w.acc - wo.acc)
-  return(imp.list)
-}
+  acc.imp <- function(w, wo, w.dat, wo.dat, y){
+    pred.w <- predict(w, w.dat)
+    pred.wo <- predict(wo, wo.dat)
+    w.acc <- sum(1 * (pred.w == y)) / length(y)
+    wo.acc <- sum(1 * (pred.wo == y)) / length(y)
+    imp.list <- list(w.acc = w.acc, wo.acc = wo.acc, dif = w.acc - wo.acc)
+    return(imp.list)
+  }
 
-push.bin <- function(l){
-  x = l$var
-  Z = l$with.test
-  sdx <- sd(Z[, x])
-  steps <- seq(-2 * sdx, 2 * sdx, (4 * sdx) / 100)
-  tester <- lapply(steps, function(z) runpred(l$with, x, z, Z))
-  t <- cbind(steps, t(list.cbind(tester)))
-  return(t)
-}
+  push.bin <- function(l){
+    x = l$var
+    Z = l$with.test
+    sdx <- sd(Z[, x])
+    steps <- seq(-2 * sdx, 2 * sdx, (4 * sdx) / 100)
+    tester <- lapply(steps, function(z) runpred(l$with, x, z, Z))
+    t <- cbind(steps, t(list.cbind(tester)))
+    return(t)
+  }
 
-thisforest.bin <- function(y, x, p, Z = X, ntrain = train.set){
-  set.seed(254)
-  true.beta <- betas[x + 1]
-  x = x + numvars + 2
-  p = p + numvars + 2
-  y = as.factor(y)
+  thisforest.bin <- function(y, x, p, Z = X, ntrain = train.set){
+    set.seed(254)
+    true.beta <- betas[x + 1]
+    x = x + numvars + 2
+    p = p + numvars + 2
+    y = as.factor(y)
 
-  set.seed(seed)
-  registerDoParallel(numCores)
-  folds <- 5
-  d <- cbind(y, Z)
-  d = as.data.frame(d)
-  names(d)[1] = 'y'
-  d$y <- as.factor(d$y)
-  d.train <- d[seq(ntrain), ]
-  d.test <- d[-seq(ntrain), ]
-  tc <- trainControl(method = 'oob',
-                     savePredictions = TRUE)
-  mod.with <- train(y ~ ., method = "parRF", data = d.train,
-                    trControl = tc, importance = TRUE,
-                    localImp = TRUE)
-  rf.basic <- randomForest(y ~ .,  data = d.train,
-                           na.action = "na.omit",
-                           ntree = 1000, nodesize = 4, importance = TRUE,
-                           localImp = TRUE)
-  without.d.train <- d.train
-  without.d.train[, x] = 0
-  without.d.test <- d.test
-  without.d.test[, x] = 0
-  mod.without <- train(y ~ ., data = without.d.train, method = "parRF",
-                       trControl = tc, importance = TRUE)
-  acc.ch <- acc.imp(mod.with, mod.without, d.test, without.d.test, d.test$y)
-  olist <- list(with = mod.with, without = mod.without,
-                with.test = d.test, without.test = without.d.test,
-                X = X, var = p, training.data.with = d.train,
-                baseRF = rf.basic, acc.imp = acc.ch$dif)
-  pusher <- push.bin(olist)
-  olist$push = pusher
-  modal <- max(table(d.test$y)) / sum(table(d.test$y))
-  olist$outrow <- c(modal, acc.ch$w.acc, acc.ch$wo.acc)
+    set.seed(seed)
+    registerDoParallel(numCores)
+    folds <- 5
+    d <- cbind(y, Z)
+    d = as.data.frame(d)
+    names(d)[1] = 'y'
+    d$y <- as.factor(d$y)
+    d.train <- d[seq(ntrain), ]
+    d.test <- d[-seq(ntrain), ]
+    tc <- trainControl(method = 'oob',
+                       savePredictions = TRUE)
+    mod.with <- train(y ~ ., method = "parRF", data = d.train,
+                      trControl = tc, importance = TRUE,
+                      localImp = TRUE)
+    rf.basic <- randomForest(y ~ .,  data = d.train,
+                             na.action = "na.omit",
+                             ntree = 1000, nodesize = 4, importance = TRUE,
+                             localImp = TRUE)
+    without.d.train <- d.train
+    without.d.train[, x] = 0
+    without.d.test <- d.test
+    without.d.test[, x] = 0
+    mod.without <- train(y ~ ., data = without.d.train, method = "parRF",
+                         trControl = tc, importance = TRUE)
+    acc.ch <- acc.imp(mod.with, mod.without, d.test, without.d.test, d.test$y)
+    olist <- list(with = mod.with, without = mod.without,
+                  with.test = d.test, without.test = without.d.test,
+                  X = X, var = p, training.data.with = d.train,
+                  baseRF = rf.basic, acc.imp = acc.ch$dif)
+    pusher <- push.bin(olist)
+    olist$push = pusher
+    modal <- max(table(d.test$y)) / sum(table(d.test$y))
+    olist$outrow <- c(modal, acc.ch$w.acc, acc.ch$wo.acc)
 
-  return(olist)
-}
+    return(olist)
+  }
 
-runpred.cont <- function(mod, var, stepper, dat){
-  dat[[var]] <- dat[[var]] + stepper
-  pred <- predict(mod, dat)
-  true <- dat$y
-  dif <- pred - true
-  return(dif)
-}
+  runpred.cont <- function(mod, var, stepper, dat){
+    dat[[var]] <- dat[[var]] + stepper
+    pred <- predict(mod, dat)
+    true <- dat$y
+    dif <- pred - true
+    return(dif)
+  }
 
-push.cont <- function(l){
-  x = l$var
-  Z = l$with.test
-  sdx <- sd(Z[, x])
-  steps <- seq(-2 * sdx, 2 * sdx, (4 * sdx) / 100)
-  tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z))
-  t <- cbind(steps, t(list.cbind(tester)))
-  return(t)
-}
+  push.cont <- function(l){
+    x = l$var
+    Z = l$with.test
+    sdx <- sd(Z[, x])
+    steps <- seq(-2 * sdx, 2 * sdx, (4 * sdx) / 100)
+    tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z))
+    t <- cbind(steps, t(list.cbind(tester)))
+    return(t)
+  }
 
-thisforest.cont <- function(y, x, p, Z = X, ntrain = train.set){
-  set.seed(254)
-  true.beta <- betas[x + 1]
-  x = x + numvars + 2
-  p = p + numvars + 2
+  thisforest.cont <- function(y, x, p, Z = X, ntrain = train.set){
+    set.seed(254)
+    true.beta <- betas[x + 1]
+    x = x + numvars + 2
+    p = p + numvars + 2
 
-  set.seed(seed)
-  registerDoParallel(numCores)
-  folds <- 5
-  d <- cbind(y, Z)
-  d = as.data.frame(d)
-  names(d)[1] = 'y'
-  d.train <- d[seq(ntrain), ]
-  d.test <- d[-seq(ntrain), ]
-  tc <- trainControl(method = 'oob',
-                     savePredictions = TRUE)
-  mod.with <- train(y ~ ., method = "ranger", data = d.train,
-                    trControl = tc)
+    set.seed(seed)
+    registerDoParallel(numCores)
+    folds <- 5
+    d <- cbind(y, Z)
+    d = as.data.frame(d)
+    names(d)[1] = 'y'
+    d.train <- d[seq(ntrain), ]
+    d.test <- d[-seq(ntrain), ]
+    tc <- trainControl(method = 'oob',
+                       savePredictions = TRUE)
+    mod.with <- train(y ~ ., method = "ranger", data = d.train,
+                      trControl = tc)
 
-  without.d.train <- d.train
-  without.d.train[, x] = 0
-  without.d.test <- d.test
-  without.d.test[, x] = 0
-  mod.without <- train(y ~ ., data = without.d.train, method = "ranger",
-                       trControl = tc)
-  pred.w <- predict(mod.with, d.test)
-  pred.wo <- predict(mod.without, without.d.test)
+    without.d.train <- d.train
+    without.d.train[, x] = 0
+    without.d.test <- d.test
+    without.d.test[, x] = 0
+    mod.without <- train(y ~ ., data = without.d.train, method = "ranger",
+                         trControl = tc)
+    pred.w <- predict(mod.with, d.test)
+    pred.wo <- predict(mod.without, without.d.test)
 
-  olist <- list(with = mod.with, without = mod.without,
-                with.test = d.test, without.test = without.d.test,
-                X = X, var = p, training.data.with = d.train,
-                kiv = d.test[, x],
-                pred.w = pred.w, pred.wo = pred.wo, test.y = d.test$y)
-  pusher <- push.cont(olist)
-  olist$push = pusher
+    olist <- list(with = mod.with, without = mod.without,
+                  with.test = d.test, without.test = without.d.test,
+                  X = X, var = p, training.data.with = d.train,
+                  kiv = d.test[, x],
+                  pred.w = pred.w, pred.wo = pred.wo, test.y = d.test$y)
+    pusher <- push.cont(olist)
+    olist$push = pusher
 
-  return(olist)
-}
+    return(olist)
+  }
 
+} #All Functions (Binomial & Cont)
 
-
+################################################################################
+#Develop Main Function -- Flexible w/ Multiple IV Allotment
+#Just Random Forest
+#Just Binomial
+#Just Linear
+################################################################################
 
 pai_main <- function(data, #Dataframe
                      outcome = NULL, #Character or Character Vector
@@ -336,6 +343,13 @@ pai_main <- function(data, #Dataframe
     } else {
       data_type <- "Continuous"
     }
+
+    if(is.null(seed)){
+      seed <- 1234
+    } else {
+      seed <- as.numeric(seed)
+    }
+
 
 
       } #Assigning Parameters
@@ -424,7 +438,7 @@ pai_main <- function(data, #Dataframe
 
         thisforest.bin <- function(y, x, p, Z = X, ntrain = train.set){
 
-            set.seed(254)
+            set.seed(seed)
             true.beta <- betas[x + 1]
             x = x + numvars + 2
             p = p + numvars + 2
@@ -493,6 +507,24 @@ pai_main <- function(data, #Dataframe
 
 }
 
+################################################################################
+#Function Parameters
+#     data = Data Frame
+#     outcome = DV: Character For Column in DF
+#     predictors = IVs: Character (or Comma-Separated Vector) for Column(s) in DF
+#         - Can Also Return 'all' or *empty*/*NULL* -- If 'all' or 'NULL', Will Use Every Column Other than DV
+#     model = Character or Vectors of Model Type (e.g., "Linear" or "LM"; "Exp", etc.)
+#     ml = Machine Learning Model (e.g., 'Random Forest' or 'rf')
+#     seed = (Optional) random seed generator (Character or Numeric -- Converts to numeric in Function)
+
+
+################################################################################
+
+
+################################################################################
+#Test w/ Sample Data
+################################################################################
+
 test_data <- data.frame(y = sample(c(0, 1), 100, replace = TRUE),
                    var1 = runif(100, 0, 100),
                    var2 = runif(100, 0, 150),
@@ -503,7 +535,8 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  model = NULL,
-                 ml = c("Random Forest", 1, 8))
+                 ml = c("Random Forest", 1, 8),
+                 seed = 1234)
 
 
 
