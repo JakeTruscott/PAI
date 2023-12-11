@@ -732,20 +732,26 @@ test <- pai_main(data = test_data,
 #Plot Sample Output
 ################################################################################
 
+
 pai_plot_BASE_flexible <- function(data,
                                    data_type = NULL,
                                    model_type = NULL,
-                                   custom_aes = NULL) {
+                                   variables = NULL,
+                                   custom_aes = NULL,
+                                   plot_points = FALSE) {
 
   {
     if (is.null(data_type)) {
       # Default to Binomial
-      data <- data$bin
+      data_type <- ifelse(data[1] == 'cont', 'Continuous', 'Binomial')
+      data <- data[[1]]
     } else if (data_type == "Binomial") {
       # Assign Binomial
+      data_type == "Binomial"
       data <- data$bin
     } else if (data_type == "Continuous") {
       # Assign Continuous
+      data_type == 'Continuous'
       data <- data$cont
     } else if (data_type == "Both") {
       stop('Need to implement a function for "Both"')
@@ -755,146 +761,93 @@ pai_plot_BASE_flexible <- function(data,
   {
     if (is.null(model_type)){
       data <- data$linear # Default to Linear
+      model_type <- "Linear"
     } else if (grepl('Linear', model_type, ignore.case = TRUE)){
       data <- data$linear # Assign Linear
+      model_type <- "Linear"
     } else if (grepl('Interact', model_type, ignore.case = TRUE)){
       data <- data$interact # Assign Interaction
+      model_type <- 'Interaction'
     } else if (grepl('Square', model_type, ignore.case = TRUE)){
       data <- data$square # Assign Square
+      model_type <- 'Square'
     } else if (grepl('polysmall', model_type, ignore.case = TRUE)){
       data <- data$polySmall # Assign Polynomial
+      model_type <- 'PolySmall'
     } else if (grepl('poly', model_type, ignore.case = TRUE)){
       data <- data$poly # Assign Poly(Small)
+      model_type <- 'Poly'
     } else if (grepl('exp', model_type, ignore.case = TRUE)){
       data <- data$exp # Assign Exponential
+      model_type <- 'Exponential'
     } else if (grepl('abs', model_type, ignore.case = TRUE)){
       data <- data$abs # Assign Abs
+      model_type <- 'Abs'
     } else if (grepl('sin', model_type, ignore.case = TRUE)){
       data <- data$sin # Assign Sin
+      model_type <- 'Sin'
     } else if (grepl('mono', model_type, ignore.case = TRUE)){
       data <- data$mono # Assign Monotonic
+      model_type <- 'Monotonic'
     }
 
   } #Subset by Model Type
 
-  data <- data.frame(data$push)
+  figures <- list()
 
-  {
-    plot_generator <- function(data, custom_aes){
+  for (var in variables){
+    temp <- data.frame(data$push[var])
+    names(temp) <- gsub(paste0(var, "\\."), '', names(temp))
 
-      if (is.null(model_type)){
-        model_type <- "Linear"
-      }
-      if (is.null(custom_aes)){
-        custom_aes <- FALSE
-      }
+    temp_data <- tidyr::gather(temp, key = "variable", value = "value", -steps)
 
-      if(!custom_aes == TRUE){
-        default_plot <- data %>%
-          ggplot(aes(x = data[,1], y = data[,2])) +
-          geom_line(aes(x = data[,1], y = data[,2]), colour = 'deepskyblue3', size = 1) +
-          geom_line(aes(x = data[,1], y = data[,3]), colour = 'coral3', size = 1) +
-          theme_minimal() +
-          labs(
-            x = '\nStepper\n',
-            y = 'Outcome\n',
-            title = paste0(model_type, ' Model'),
-            subtitle = "Steppers & Model Accuracy",
-            caption = 'Note: Lines Should be Parallel & (Weakly) Monotonic')  +
-          theme(
-            axis.title = element_text(size = 15),
-            axis.text = element_text(size = 15),
-            panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
-            legend.title.align = 0.5,
-            legend.text.align = 0.25,
-            legend.title = element_blank(),
-            legend.text = element_text(size = 15, color = "gray5"),
-            legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
-            legend.position = "bottom",
-            strip.text = element_text(size = 14, face = "bold"),
-            strip.background = element_rect(fill = "gray", color = "gray5"),
-            plot.title = element_text(size = 18, face = "bold"),
-            plot.subtitle = element_text(size = 15),
-            plot.caption = element_text(size = 10, hjust = 0))
 
-        return(default_plot)
 
-      } else {
-        custom_plot <- data %>%
-          ggplot(aes(x = data[,1], y = data[,2])) +
-          theme_minimal()
-        warning('Returned Empty Plot - Add ggplot2() Aesthetics Using "+"')
-        return(custom_plot)
-      }
-    }  #Plot Generator
-  } #Plot Generator (Function)
+    temp_figure <- ggplot(data = temp_data, aes(x = steps, y = value)) +
+      stat_smooth(method = 'lm', formula = y ~ x, se = FALSE, size = 1, colour = 'red') +
+      theme_minimal() +
+      geom_hline(yintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
+      labs(title = var,
+           subtitle = paste0(data_type, ' Data - ', model_type, ' Model')) +
+      theme(
+        axis.text = element_text(size = 14),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+        legend.title.align = 0.5,
+        legend.text.align = 0.25,
+        legend.title = element_blank(),
+        legend.text = element_text(size = 15, color = "gray5"),
+        legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
+        legend.position = "bottom",
+        strip.text = element_text(size = 14, face = "bold"),
+        strip.background = element_rect(fill = "gray", color = "gray5"),
+        plot.title = element_text(size = 18, face = "bold"),
+        plot.subtitle = element_text(size = 15),
+        plot.caption = element_text(size = 10, hjust = 0))
 
-  plot <- plot_generator(data = data,
-                         custom_aes= custom_aes)
+    if (plot_points == TRUE){
+      temp_figure <- temp_figure + geom_point(alpha = 1/10)
+    }
 
-  return(plot)
+    figures[[var]] <- temp_figure
+
+    }
+
+  yleft <- textGrob("\nEffect on Outcome\n", rot = 90, gp = gpar(fontsize = 15))
+  bottom <- textGrob("Steps\n",  gp = gpar(fontsize = 15))
+
+  uni <-  grid.arrange(grobs = figures, left = yleft, bottom = bottom)
+
+  return(uni)
 
 }
 
 
 pai_plot_BASE_flexible(test,
                        data_type = 'Continuous',
-                       model_type = "Linear")
-
-pai_plot_BASE_flexible_multiple <- function(data,
-                                            data_types = NULL,
-                                            model_types = NULL){
-
-  data_types = ifelse(grepl('Binomial', data_types, ignore.case = T), 'Binomial', 'Continuous')
-
-  figures <- list()
-
-  for (d in data_types){
-
-    model_temp_figures <- list()
-
-    for (m in model_types){
-
-      {
-
-        temp_figure <- pai_plot_BASE_flexible(data = data,
-                                              data_type = d,
-                                              model_type = m,
-                                              custom_aes = F) +
-          labs(y = "",
-               x = "",
-               caption = " ",
-               title = paste0(stringr::str_to_title(m), " Model (", d, ")")) +
-          theme(plot.title = element_text(size = 15, face = "bold"),
-                plot.subtitle = element_text(size = 12),
-                axis.text = element_text(size = 10))
+                       model_type = "Linear",
+                       variables = c('var1', 'var2'))
 
 
-      } #Compile Temp Figure
-
-
-
-      model_temp_figures[[m]] <- temp_figure
-
-    }
-
-    figures[[d]] <- model_temp_figures
-
-  }
-
-  all_figures <- unlist(figures, recursive = FALSE)
-
-  yleft <- textGrob("\nOutcome or Prediction", rot = 90, gp = gpar(fontsize = 15))
-  bottom <- textGrob("Steps\n",  gp = gpar(fontsize = 15))
-
-
-  uni <-  grid.arrange(grobs = all_figures, left = yleft, bottom = bottom)
-
-  return(uni)
-
-} #Code for Producing Multiple Figures w/ Flexible Selection
-
-pai_plot_BASE_flexible_multiple(data = test,
-                                data_type = 'continuous',
-                                model_types = c('linear', 'exp', 'sin', 'mono'))
 
