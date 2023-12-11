@@ -270,7 +270,7 @@ pai_main <- function(data, #Dataframe
                      outcome = NULL, #Character or Character Vector
                      predictors = NULL, #Character or Character Vector
                      model = NULL, #Model Type ("Linear") or Vector of Models
-                     ml = c(NA, NA, NA), #Vector List of ML Model (Character) + Folds (Numeric) + Cores (Numeric)
+                     ml = c(NA, NA), #Vector List of ML Model (Character) + Folds (Numeric) + Cores (Numeric)
                      seed = NULL){ #Numeric Seed
 
   message("-------------------------------------------------------------------")
@@ -309,31 +309,23 @@ pai_main <- function(data, #Dataframe
       ml[1] <- "Random Forest"
     } #Declare ml
 
-    if(is.na(ml[2])){
-      ml[2] <- 5
+    if (is.na(ml[2])) {
+      ml[2] <- 2
     } else {
       ml[2] <- as.numeric(ml[2])
-    } #Declare Folds
-
-    if (is.na(ml[3])) {
-      ml[3] <- 2
-    } else {
-      ml[3] <- as.numeric(ml[3])
     } #Declare Cores
 
-    numCores <- as.numeric(ml[3])
+    numCores <- as.numeric(ml[2])
 
-    if (any(is.na(ml[c(1, 2, 3)]))) {
+    if (any(is.na(ml[c(1, 2)]))) {
       message("    NULL or Default Assigned Within 1 or More Parameters in 'ml'")
       message('    ML Parameters:')
       message("          ML Model: ", ml[1])
-      message("          Folds: ", ml[2])
-      message("          Cores: ", ml[3])
+      message("          Cores: ", ml[2])
     } else {
       message('    ML Parameters:')
       message("          ML Model: ", ml[1])
-      message("          Folds: ", ml[2])
-      message("          Cores: ", ml[3])
+      message("          Cores: ", ml[2])
     }
 
     unique_dv_values <- data[[outcome]]
@@ -584,79 +576,13 @@ pai_main <- function(data, #Dataframe
         ydisc <- 1*(ystar0>0)
       } #Get Set Parameters - Retrieve Betas, Y*, etc.
       {
-        x0 <- rnorm(obs)
+        #x0 <- rnorm(obs)
         ystar <- ystar0 + 2*x0
-        ydisc0 <- 1*(ystar>0)
+        ydisc0 <- ydisc
         ystar.lin <- ystar
       } #Linear Variables
       {
-        x1 <- rnorm(obs, 1, 1)
-        x2 <- rnorm(obs,1,1)
-        intereact.beta = 10
-        ystar <- ystar0 + intereact.beta*x1*x2
-        ydisc1 <- 1*(ystar>0)
-        ystar.inter <- ystar
-      } #Interaction Term
-      {
-        x3 <- rnorm(obs)
-        ystar <- ystar0 + 3*x3^2
-        ydisc2 <- 1*(ystar>0)
-        ystar.sq <- ystar
-      } #Square Term
-      {
-        x4 <- rnorm(obs)
-        x5 <- rnorm(obs)
-
-        ystar <- ystar0 + 2*x4^3 - 6*x5^5
-        ydisc3 <- 1*(ystar>0)
-        ystar.poly <- ystar
-
-        x6 <- rnorm(obs)
-
-        ystar <- ystar0 + 2^x6
-        ydisc4 <- 1*(ystar>0)
-        ystar.exp <- ystar
-
-      } #Higher-Order Polynomials
-      {
-        x7 <- rnorm(obs)
-
-        ystar <- ystar0 + abs(x7)
-        ydisc5 <- 1*(ystar>0)
-        ystar.abs <- ystar
-      } #Continuous Effect
-      {
-        x8 <- rnorm(obs)
-
-        ystar <- ystar0 + sin(x8*pi)
-        ydisc6 <- 1*(ystar>0)
-        ystar.sin <- ystar
-      } #Add Sin
-      { x9 <- rnorm(obs)
-        x9.1 <- x9
-        x9.1[x9.1 > quantile(x9.1,.2) & x9.1 < quantile(x9.1,.4)] = quantile(x9.1,.2)
-        x9.1[x9.1 > quantile(x9.1,.6) & x9.1 < quantile(x9.1,.8)] = quantile(x9.1,.6)
-
-        ystar <- ystar0 + 4*x9.1
-        ydisc7 <- 1*(ystar>0)
-        ystar.mono <- ystar
-      } #Weekly Monotonic Effect
-      {
-        ch0 <- sum(1*(ydisc != ydisc0))
-        ch1 <- sum(1*(ydisc != ydisc1))
-        ch2 <- sum(1*(ydisc != ydisc2))
-        ch3 <- sum(1*(ydisc != ydisc3))
-        ch4 <- sum(1*(ydisc != ydisc4))
-        ch5 <- sum(1*(ydisc != ydisc5))
-        ch6 <- sum(1*(ydisc != ydisc6))
-        ch7 <- sum(1*(ydisc != ydisc7))
-
-        changes <- c(ch0, ch1, ch2, ch3, ch4, ch5, ch6, ch7)
-      } #Track How Dichotomous Observations Changed w/ Each Step
-      {
-        changes <- c(ch0, ch1, ch2, ch3, ch4, ch5, ch6, ch7)
-
-        X <- as.data.frame(cbind(exes, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9))
+        X <- dat
         X.train <- X[seq(train.set),]
         X.test <- X[-seq(train.set),]
       } #Combine to DF
@@ -677,65 +603,74 @@ pai_main <- function(data, #Dataframe
           return(imp.list)
         }
         push.cont <- function(l){
-          x = l$var
-          Z = l$with.test
-          sdx <- sd(Z[,x])
-          steps <- seq(-2*sdx, 2*sdx, (4*sdx)/100)
-          tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z ))
-          t <- cbind(steps, t(list.cbind(tester)))
+          t <- list()
+
+          for (v in 1:length(l$var)){
+            x = l$var[v]
+            Z = l$with.test
+            sdx <- sd(Z[,x])
+            steps <- seq(-2*sdx, 2*sdx, (4*sdx)/100)
+            tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z ))
+            temp <- cbind(steps, t(list.cbind(tester)))
+            t[[x]] <- temp
+          }
+
           return(t)
         }
-        thisforest.cont <- function(y, x, p, Z=X, ntrain=train.set){
+        thisforest.cont <- function(y, predictors, Z = X, ntrain = train.set) {
           set.seed(seed)
-          true.beta <- betas[x+1]
-          x = x+numvars+2
-          p = p+numvars+2
 
-          set.seed(seed)
           registerDoParallel(numCores)
-          folds <- 5
-          d <- cbind(y,Z)
+
+          Z <- Z[names(Z) %in% predictors]
+
+          d <- cbind(y, Z)
           d = as.data.frame(d)
-          names(d)[1]='y'
-          d.train <- d[seq(ntrain),]
-          d.test <- d[-seq(ntrain),]
-          tc <- trainControl(method = 'oob',
-                             savePredictions = TRUE)
-          mod.with <- train(y ~ ., method = "ranger", data=d.train,
-                            trControl = tc)
-          without.d.train <- d.train
-          without.d.train[,x] = 0
-          without.d.test <- d.test
-          without.d.test[,x] = 0
-          mod.without <- train(y ~ ., data=without.d.train, method = "ranger",
-                               trControl = tc)
-          pred.w <- predict(mod.with, d.test)
+
+          tc <- trainControl(method = 'oob', savePredictions = TRUE)
+
+          without.d.train <- d[seq(ntrain), ]
+
+          without.d.test <- d[-seq(ntrain), ]
+
+          capture_output_mod.with <- capture.output({
+            mod.with <- train(y ~ ., method = "ranger", data = d[seq(ntrain),], trControl = tc)
+          })
+
+          capture_output_mod.without <- capture.output({
+            mod.without <- train(y ~ ., data = without.d.train, method = "ranger", trControl = tc)
+          })
+
+
+          pred.w <- predict(mod.with, d[-seq(ntrain), ])
           pred.wo <- predict(mod.without, without.d.test)
 
-          olist <- list(with=mod.with, without=mod.without,
-                        with.test=d.test, without.test=without.d.test,
-                        X=X, var=p, training.data.with = d.train,
-                        #baseRF = rf.basic,
-                        kiv = d.test[,x],
-                        pred.w=pred.w, pred.wo=pred.wo, test.y=d.test$y)
+          olist <- list(
+            with = mod.with,
+            without = mod.without,
+            with.test = d[-seq(ntrain), ],
+            without.test = without.d.test,
+            X = X,
+            var = predictors,
+            training.data.with = d[seq(ntrain), ],
+            kiv = d[-seq(ntrain), predictors, drop = FALSE],
+            pred.w = pred.w,
+            pred.wo = pred.wo,
+            test.y = d[-seq(ntrain), ]$y
+          )
+
           pusher <- push.cont(olist)
           olist$push = pusher
 
           return(olist)
         }
 
+
       } #Continuous Data Functions
       {
         sandbox.models$cont <- list()
-        sandbox.models$cont$linear <- thisforest.cont(ystar.lin, 0, 0)
-        sandbox.models$cont$interact <- thisforest.cont(ystar.inter, c(1,2), 1)
-        sandbox.models$cont$square <- thisforest.cont(ystar.sq, 3, 3)
-        sandbox.models$cont$poly <- thisforest.cont(ystar.poly, c(4,5), 5)
-        sandbox.models$cont$polySmall <- thisforest.cont(ystar.poly, c(4,5), 4)
-        sandbox.models$cont$exp <- thisforest.cont(ystar.exp, 6, 6)
-        sandbox.models$cont$abs<- thisforest.cont(ystar.abs, 7, 7)
-        sandbox.models$cont$sin<- thisforest.cont(ystar.sin, 8, 8)
-        sandbox.models$cont$mono<- thisforest.cont(ystar.mono, 9, 9)
+        sandbox.models$cont$linear <- thisforest.cont(y = ystar.lin, predictors = predictors, )
+
       } #Allocate Outputs to List
     } #Continuous
   } #PAI Sandbox Models
@@ -749,6 +684,7 @@ pai_main <- function(data, #Dataframe
 
 
 }
+
 
 
 ################################################################################
@@ -773,16 +709,8 @@ set.seed(1234)
 test_data <- data.frame(y = sample(c(0:50), 100, replace = TRUE),
                    var1 = rnorm(100, mean = 0, sd = 1),
                    var2 = rnorm(100, mean = 1, sd = 1),
-                   var3 = rnorm(100, mean = 3, sd = 1),
+                   var3 = rnorm(100, mean = 3, sd = 2),
                    var4 = rnorm(100, mean = 0, sd = 1))
-
-test <- pai_main(data = test_data,
-                 outcome = "y",
-                 predictors = c("var1", "var2", "var3"),
-                 model = NULL,
-                 ml = c("Random Forest", 5, 8),
-                 seed = 1234)
-
 
 data = test_data
 outcome = "y"
@@ -790,6 +718,13 @@ predictors = c("var1", "var2", "var3")
 model = NULL
 ml = c("Random Forest", 5, 8)
 seed = 1234
+
+test <- pai_main(data = test_data,
+                 outcome = "y",
+                 predictors = c("var1", "var2", "var3"),
+                 model = NULL,
+                 ml = c("Random Forest", 8),
+                 seed = 1234)
 
 
 
