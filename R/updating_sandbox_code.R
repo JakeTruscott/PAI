@@ -712,12 +712,6 @@ test_data <- data.frame(y = sample(c(0:50), 100, replace = TRUE),
                    var3 = rnorm(100, mean = 3, sd = 2),
                    var4 = rnorm(100, mean = 0, sd = 1))
 
-data = test_data
-outcome = "y"
-predictors = c("var1", "var2", "var3")
-model = NULL
-ml = c("Random Forest", 5, 8)
-seed = 1234
 
 test <- pai_main(data = test_data,
                  outcome = "y",
