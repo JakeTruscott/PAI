@@ -9,7 +9,7 @@
 ################################################################################
 #Load Packages
 ################################################################################
-library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW)
+library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork)
 
 ################################################################################
 #Develop Sandbox Data
@@ -634,13 +634,17 @@ pai_main <- function(data, #Dataframe
           without.d.test <- d[-seq(ntrain), ]
 
           capture_output_mod.with <- capture.output({
-            mod.with <- train(y ~ ., method = "ranger", data = d[seq(ntrain),], trControl = tc)
+            mod.with <- train(y ~ ., method = "ranger", data = d[seq(ntrain),], trControl = tc, importance = 'impurity')
           })
+
+
+          var_importance_with <- ranger::importance(mod.with$finalModel)
 
           capture_output_mod.without <- capture.output({
-            mod.without <- train(y ~ ., data = without.d.train, method = "ranger", trControl = tc)
+            mod.without <- train(y ~ ., method = "ranger", data = without.d.train, trControl = tc, importance = 'impurity')
           })
 
+          var_importance_without <- ranger::importance(mod.without$finalModel)
 
           pred.w <- predict(mod.with, d[-seq(ntrain), ])
           pred.wo <- predict(mod.without, without.d.test)
@@ -648,6 +652,8 @@ pai_main <- function(data, #Dataframe
           olist <- list(
             with = mod.with,
             without = mod.without,
+            variable_importance_with = var_importance_with,
+            variable_importance_without = var_importance_without,
             with.test = d[-seq(ntrain), ],
             without.test = without.d.test,
             X = X,
@@ -720,7 +726,12 @@ test <- pai_main(data = test_data,
                  ml = c("Random Forest", 8),
                  seed = 1234)
 
-
+data = test_data
+outcome = "y"
+predictors = c("var1", "var2", "var3")
+model = NULL
+ml = c("Random Forest", 8)
+seed = 1234
 
 ################################################################################
 #Plot Sample Output
@@ -793,16 +804,19 @@ pai_plot_BASE_flexible <- function(data,
     temp <- data.frame(data$push[var])
     names(temp) <- gsub(paste0(var, "\\."), '', names(temp))
 
+    importance_with <- round(data$variable_importance_with[var], 2)
+    importance_without <- round(data$variable_importance_without[var], 2)
+
     temp_data <- tidyr::gather(temp, key = "variable", value = "value", -steps)
 
-
-
     temp_figure <- ggplot(data = temp_data, aes(x = steps, y = value)) +
-      stat_smooth(method = 'lm', formula = y ~ x, se = FALSE, size = 1, colour = 'red') +
+      stat_smooth(method = 'lm', geom = 'smooth', formula = y ~ x, se = FALSE, size = 1, colour = 'deepskyblue3') +
       theme_minimal() +
       geom_hline(yintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
+      geom_vline(xintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
       labs(title = var,
-           subtitle = paste0(data_type, ' Data - ', model_type, ' Model')) +
+           subtitle = paste0(model_type, ' Model'),
+           caption = paste0('\nVariable Importance: ', as.numeric(importance_with), ' (With) & ', as.numeric(importance_without), ' (Without)')) +
       theme(
         axis.text = element_text(size = 14),
         axis.title.x = element_blank(),
@@ -818,22 +832,24 @@ pai_plot_BASE_flexible <- function(data,
         strip.background = element_rect(fill = "gray", color = "gray5"),
         plot.title = element_text(size = 18, face = "bold"),
         plot.subtitle = element_text(size = 15),
-        plot.caption = element_text(size = 10, hjust = 0))
+        plot.caption = element_text(size = 12, hjust = 0, face = 'italic'),
+        plot.background = element_rect(size = 1, colour = 'gray5', fill = NA))
+
+
 
     if (plot_points == TRUE){
       temp_figure <- temp_figure + geom_point(alpha = 1/10)
     }
 
+
     figures[[var]] <- temp_figure
 
-    }
-
+  }
   yleft <- textGrob("\nEffect on Outcome\n", rot = 90, gp = gpar(fontsize = 15))
-  bottom <- textGrob("Steps\n",  gp = gpar(fontsize = 15))
-
+  bottom <- textGrob("\nSteps\n",  gp = gpar(fontsize = 15))
   uni <-  grid.arrange(grobs = figures, left = yleft, bottom = bottom)
-
   return(uni)
+
 
 }
 
@@ -841,7 +857,13 @@ pai_plot_BASE_flexible <- function(data,
 pai_plot_BASE_flexible(test,
                        data_type = 'Continuous',
                        model_type = "Linear",
-                       variables = c('var1', 'var2'))
+                       variables = c('var1', 'var2', 'var3'),
+                       plot_points = FALSE)
 
 
-
+data = test
+data_type = 'Continuous'
+model_type = "Linear"
+variables = c('var1', 'var2', 'var3')
+plot_type = 'Combined'
+plot_points = FALSE
