@@ -267,11 +267,11 @@ library(randomForest); library(doParallel); library(caret); library(parallel); l
 ################################################################################
 
 pai_main <- function(data, #Dataframe
-                     outcome = NULL, #Character or Character Vector
-                     predictors = NULL, #Character or Character Vector
-                     model = NULL, #Model Type ("Linear") or Vector of Models
-                     ml = c(NA, NA), #Vector List of ML Model (Character) + Folds (Numeric) + Cores (Numeric)
-                     seed = NULL){ #Numeric Seed
+                     outcome = NULL, #Character or Character Vector (Required)
+                     predictors = NULL, #Character or Character Vector (Optional - Default to 'all' Except DV)
+                     model = NULL, #Model Type ("Linear") or Vector of Models (Default to Linear)
+                     ml = c(NA, NA), #Vector List of ML Model (Character) + Cores (Numeric) (Optional - Default to RF & 2)
+                     seed = NULL){ #Numeric Seed (Optional - Default to 1234)
 
   message("-------------------------------------------------------------------")
   cat("---------------------- Beginning PAI Process ----------------------\n")
@@ -677,13 +677,6 @@ test <- pai_main(data = test_data,
                  ml = c("Random Forest", 8),
                  seed = 1234)
 
-data = test_data
-outcome = "y"
-predictors = c("var1", "var2", "var3")
-model = NULL
-ml = c("Random Forest", 8)
-seed = 1234
-
 
 ################################################################################
 #Plot Sample Output
@@ -813,9 +806,3 @@ pai_plot_BASE_flexible(test,
                        plot_points = FALSE)
 
 
-data = test
-data_type = 'Binomial'
-model_type = "Linear"
-variables = c('var1', 'var2', 'var3')
-plot_type = 'Combined'
-plot_points = FALSE
