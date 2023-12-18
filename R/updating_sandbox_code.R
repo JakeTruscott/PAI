@@ -430,58 +430,94 @@ pai_main <- function(data, #Dataframe
         }
 
         thisforest.bin <- function(y, predictors, Z = X, ntrain = train.set) {
-
           set.seed(seed)
-
           registerDoParallel(numCores)
           Z <- Z[names(Z) %in% predictors]
 
           d <- cbind(y, Z)
-          d = as.data.frame(d)
-          names(d)[1] = 'y'
+          d <- as.data.frame(d)
+          names(d)[1] <- 'y'
           d$y <- ifelse(d$y >= 1, 1, 0)
 
+          d.train <- d[seq(ntrain),]
+          d.test <- d[-seq(ntrain),]
 
-          tc <- trainControl(method = 'oob', savePredictions = TRUE)
+          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
-          without.d.train <- d[seq(ntrain), ]
+          capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
+            train(factor(y) ~ .,
+                  method = "parRF",
+                  data=d.train,
+                  trControl = tc,
+                  importance=TRUE,
+                  localImp=TRUE))})
 
-          without.d.test <- d[-seq(ntrain), ]
+          capture_output_rf.basic <- capture.output({rf.basic <- randomForest(factor(y) ~ .,
+                                                                              data=d.train,
+                                                                              na.action="na.omit",
+                                                                              ntree=1000,
+                                                                              nodesize=4,
+                                                                              importance=TRUE,
+                                                                              localImp=TRUE)})
 
-          capture_output_mod.with <- capture.output({
-            mod.with <- train(factor(y) ~ ., method = "ranger", data = d[seq(ntrain),], trControl = tc, importance = 'impurity')
-          })
+          message("    Beginning RF w/ Permutation of Unique Predictors...")
+
+          accuracy <- list()
+
+          for (var in predictors) {
+            message("        Dropping Variable = ", var)
+            without.d.train <- d.train %>%
+              select(-all_of(var))
+            without.d.test <- d.test %>%
+              select(-all_of(var))
+
+            replications <- 50
+            count <- 1
+
+            for (rep_count in 1:replications){
+              if(rep_count <= max(replications)){
+                placebo_accuracy <- replicate(1, {
+                  shuffle_data <- d.train
+                  shuffle_data[[var]] <- sample(shuffle_data[[var]])
+
+                  capture_output_mod.placebo <- capture.output({mod.placebo <- suppressWarnings(
+                    train(y ~ .,
+                          data=shuffle_data,
+                          method = "parRF",
+                          trControl = tc,
+                          importance=TRUE))})
+
+                  # Store model output for each iteration of the placebo test
+                  list(model = mod.placebo)
+
+                })
+
+                if (count %% 10 == 0){
+                  cat(paste0("            Completed ", count, " Iterations\n"))
+                }
+                count <- count + 1
+
+              }
+            }
 
 
-          var_importance_with <- ranger::importance(mod.with$finalModel)
+            accuracy[[var]] <- list(with = mod.with, without = accuracy[[var]], placebo = placebo_accuracy)
 
-          capture_output_mod.without <- capture.output({
-            mod.without <- train(factor(y) ~ ., method = "ranger", data = without.d.train, trControl = tc, importance = 'impurity')
-          })
-
-          var_importance_without <- ranger::importance(mod.without$finalModel)
-
-          pred.w <- predict(mod.with, d[-seq(ntrain), ])
-          pred.wo <- predict(mod.without, without.d.test)
+          }
 
 
-          acc.ch <- acc.imp(mod.with, mod.without, d.test, without.d.test, d.test$y)
 
           olist <- list(
             with = mod.with,
-            without = mod.without,
-            variable_importance_with = var_importance_with,
-            variable_importance_without = var_importance_without,
-            with.test = d[-seq(ntrain), ],
-            without.test = without.d.test,
+            rf.basic = rf.basic,
             X = X,
+            with.test = d.test,
+            with.train = d.train,
             var = predictors,
             training.data.with = d[seq(ntrain), ],
             kiv = d[-seq(ntrain), predictors, drop = FALSE],
-            pred.w = pred.w,
-            pred.wo = pred.wo,
             test.y = d[-seq(ntrain), ]$y,
-            acc.ch = acc.ch
+            acc.ch = accuracy
           )
 
           pusher <- push.bin(olist)
@@ -575,45 +611,86 @@ pai_main <- function(data, #Dataframe
           d <- cbind(y, Z)
           d = as.data.frame(d)
 
-          tc <- trainControl(method = 'oob', savePredictions = TRUE)
+          d.train <- d[seq(ntrain),]
+          d.test <- d[-seq(ntrain),]
 
-          without.d.train <- d[seq(ntrain), ]
-
-          without.d.test <- d[-seq(ntrain), ]
-
-          capture_output_mod.with <- capture.output({
-            mod.with <- train(y ~ ., method = "ranger", data = d[seq(ntrain),], trControl = tc, importance = 'impurity')
-          })
+          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
 
-          var_importance_with <- ranger::importance(mod.with$finalModel)
+          capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
+            train(y ~ .,
+                  method = "parRF",
+                  data=d.train,
+                  trControl = tc,
+                  importance=TRUE,
+                  localImp=TRUE))})
 
-          capture_output_mod.without <- capture.output({
-            mod.without <- train(y ~ ., method = "ranger", data = without.d.train, trControl = tc, importance = 'impurity')
-          })
+          capture_output_rf.basic <- capture.output({rf.basic <- randomForest(y ~ .,
+                                                                              data=d.train,
+                                                                              na.action="na.omit",
+                                                                              ntree=1000,
+                                                                              nodesize=4,
+                                                                              importance=TRUE,
+                                                                              localImp=TRUE)})
 
-          var_importance_without <- ranger::importance(mod.without$finalModel)
+          message("    Beginning RF w/ Permutation of Unique Predictors...")
 
-          pred.w <- predict(mod.with, d[-seq(ntrain), ])
-          pred.wo <- predict(mod.without, without.d.test)
+          accuracy <- list()
 
-          acc.ch <- acc.imp(mod.with, mod.without, d.test, without.d.test, d.test$y)
+
+          for (var in predictors) {
+            message("        Dropping Variable = ", var)
+            without.d.train <- d.train %>%
+              select(-all_of(var))
+            without.d.test <- d.test %>%
+              select(-all_of(var))
+
+            replications <- 5
+            count <- 1
+
+            for (rep_count in 1:replications){
+              if(rep_count <= max(replications)){
+                placebo_accuracy <- replicate(1, {
+                  shuffle_data <- d.train
+                  shuffle_data[[var]] <- sample(shuffle_data[[var]])
+
+                  capture_output_mod.placebo <- capture.output({mod.placebo <- suppressWarnings(
+                    train(y ~ .,
+                          data=shuffle_data,
+                          method = "parRF",
+                          trControl = tc,
+                          importance=TRUE))})
+
+                  # Store model output for each iteration of the placebo test
+                  list(model = mod.placebo)
+
+                })
+
+                if (count %% 10 == 0){
+                  cat(paste0("            Completed ", count, " Iterations\n"))
+                }
+                count <- count + 1
+
+              }
+            }
+
+
+            accuracy[[var]] <- list(with = mod.with, without = accuracy[[var]], placebo = placebo_accuracy)
+
+          }
+
 
           olist <- list(
             with = mod.with,
-            without = mod.without,
-            variable_importance_with = var_importance_with,
-            variable_importance_without = var_importance_without,
-            with.test = d[-seq(ntrain), ],
-            without.test = without.d.test,
+            rf.basic = rf.basic,
             X = X,
+            with.test = d.test,
+            with.train = d.train,
             var = predictors,
             training.data.with = d[seq(ntrain), ],
             kiv = d[-seq(ntrain), predictors, drop = FALSE],
-            pred.w = pred.w,
-            pred.wo = pred.wo,
             test.y = d[-seq(ntrain), ]$y,
-            acc.ch = acc.ch
+            acc.ch = accuracy
           )
 
           pusher <- push.cont(olist)
@@ -663,11 +740,11 @@ pai_main <- function(data, #Dataframe
 ################################################################################
 
 set.seed(1234)
-test_data <- data.frame(y = sample(c(0,1), 1000, replace = TRUE),
-                   var1 = rnorm(1000, mean = 0, sd = 1),
-                   var2 = rnorm(1000, mean = 1, sd = 1),
+test_data <- data.frame(y = sample(rnorm(0:1000), 1000, replace = TRUE),
+                   var1 = rnorm(1000, mean = 25, sd = 1),
+                   var2 = rnorm(1000, mean = 75, sd = 1),
                    var3 = rnorm(1000, mean = 3, sd = 2),
-                   var4 = rnorm(1000, mean = 0, sd = 1))
+                   var4 = rnorm(1000, mean = 100, sd = 1))
 
 
 test <- pai_main(data = test_data,
@@ -676,6 +753,14 @@ test <- pai_main(data = test_data,
                  model = NULL,
                  ml = c("Random Forest", 8),
                  seed = 1234)
+
+
+test$cont$linear$acc.ch %>%
+  ggplot(aes(x = var, y = fit_change)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = min_change, ymax = max_change)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  theme_test()
 
 
 ################################################################################
@@ -802,7 +887,20 @@ pai_plot_BASE_flexible <- function(data,
 pai_plot_BASE_flexible(test,
                        data_type = 'Binomial',
                        model_type = "Linear",
-                       variables = c('var1', 'var2', 'var3'),
+                       variables = c('var1'),
                        plot_points = FALSE)
 
+
+
+test$cont$linear$acc.ch$var1$placebo$model$pred
+
+sandbox.models <- test
+
+continuous_results <- sandbox.models$cont$linear
+continuous_predictors <- continuous_results$var
+
+continuous_accuracy_results <- lapply(continuous_predictors, function(var) {
+  result <- continuous_results$acc.ch[[var]]
+  data.frame(Variable = var, With = result$with.acc, Without = result$wo.acc, Difference = result$dif)
+})
 
