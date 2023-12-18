@@ -601,6 +601,84 @@ pai_main <- function(data, #Dataframe
 
           return(t)
         }
+        placebo_shuffle <- function(w, d.train, d.test){
+          message("    Beginning Placebo Protocol...")
+
+          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+          replications <- 5
+          count <- 1
+          placebos <- data.frame()
+
+          for (rep_count in 1:replications){
+            placebo_accuracy <- replicate(1, {
+              shuffle_data <- d.train
+
+              capture_output_mod.placebo <- capture.output({mod.placebo <- suppressWarnings(
+                train(y ~ .,
+                      data=shuffle_data,
+                      method = "parRF",
+                      trControl = tc,
+                      importance=TRUE))})
+
+              # Store model output for each iteration of the placebo test
+              list(model = mod.placebo)
+
+            })
+
+            change = placebo_accuracy$model$finalModel$importance[,1] #Change in %IncMSE
+            change = t(data.frame(change))
+
+
+            if (count %% 10 == 0){
+              cat(paste0("            Completed ", count, " Iterations\n"))
+            }
+
+            count <- count + 1
+
+            placebo_temp <- data.frame(cbind(rep_count, change))
+
+            placebos <- bind_rows(placebos, placebo_temp)
+
+          }
+
+
+
+          return(placebos)
+
+        }
+        dropping_vars <- function(mod.with, predictors, d.train){
+
+          message("    Beginning Variable Omission Protocol...")
+
+          fit_change <- data.frame()
+
+          for (var in predictors){
+
+            data_without_var <- d.train %>%
+              select(-var)
+
+            tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+            capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
+              train(y ~ .,
+                    method = "parRF",
+                    data= data_without_var,
+                    trControl = tc,
+                    importance=TRUE,
+                    localImp=TRUE))})
+
+            RMSE_drop_var <- mod.without_var$results$RMSE
+            original_RMSE <- mod.with$results$RMSE[1]
+            change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
+
+            fit_change <- bind_rows(fit_change, change)
+
+          }
+
+          return(fit_change)
+
+        }
         thisforest.cont <- function(y, predictors, Z = X, ntrain = train.set) {
           set.seed(seed)
 
@@ -633,51 +711,19 @@ pai_main <- function(data, #Dataframe
                                                                               importance=TRUE,
                                                                               localImp=TRUE)})
 
-          message("    Beginning RF w/ Permutation of Unique Predictors...")
 
-          accuracy <- list()
-
-
-          for (var in predictors) {
-            message("        Dropping Variable = ", var)
-            without.d.train <- d.train %>%
-              select(-all_of(var))
-            without.d.test <- d.test %>%
-              select(-all_of(var))
-
-            replications <- 5
-            count <- 1
-
-            for (rep_count in 1:replications){
-              if(rep_count <= max(replications)){
-                placebo_accuracy <- replicate(1, {
-                  shuffle_data <- d.train
-                  shuffle_data[[var]] <- sample(shuffle_data[[var]])
-
-                  capture_output_mod.placebo <- capture.output({mod.placebo <- suppressWarnings(
-                    train(y ~ .,
-                          data=shuffle_data,
-                          method = "parRF",
-                          trControl = tc,
-                          importance=TRUE))})
-
-                  # Store model output for each iteration of the placebo test
-                  list(model = mod.placebo)
-
-                })
-
-                if (count %% 10 == 0){
-                  cat(paste0("            Completed ", count, " Iterations\n"))
-                }
-                count <- count + 1
-
-              }
-            }
+          placebo <- placebo_shuffle(mod.with, d.train, d.test)
+          placebo <- placebo %>%
+            select(-rep_count) %>%
+            tidyr::pivot_longer(cols = starts_with("var"), names_to = "var") %>%
+            group_by(var) %>%
+            summarize(min_change = min(value),
+                      max_change = max(value))
 
 
-            accuracy[[var]] <- list(with = mod.with, without = accuracy[[var]], placebo = placebo_accuracy)
+          fit_change <- dropping_vars(mod.with, predictors, d.train)
 
-          }
+          fit_assess <- left_join(placebo, fit_change, by = 'var')
 
 
           olist <- list(
@@ -690,7 +736,7 @@ pai_main <- function(data, #Dataframe
             training.data.with = d[seq(ntrain), ],
             kiv = d[-seq(ntrain), predictors, drop = FALSE],
             test.y = d[-seq(ntrain), ]$y,
-            acc.ch = accuracy
+            acc.ch = fit_assess
           )
 
           pusher <- push.cont(olist)
@@ -718,6 +764,7 @@ pai_main <- function(data, #Dataframe
 
 
 }
+
 
 
 
