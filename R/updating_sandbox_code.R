@@ -889,11 +889,16 @@ ggplot(data = t, aes(x = var_numeric, y = fit_change)) +
 pai_plot_BASE_flexible <- function(data,
                                    data_type = NULL,
                                    model_type = NULL,
+                                   plot_type = NULL,
                                    variables = NULL,
-                                   custom_aes = NULL,
                                    plot_points = FALSE) {
 
-  {
+  if(is.null(plot_type)){
+    plot_type <- 'Placebo'
+  } # Assign 'Placebo' if plot_type = NULL
+
+  if(plot_type == 'Placebo'){
+
     if (is.null(data_type)) {
       # Default to Binomial
       data_type <- ifelse(data[1] == 'cont', 'Continuous', 'Binomial')
@@ -910,93 +915,188 @@ pai_plot_BASE_flexible <- function(data,
       stop('Need to implement a function for "Both"')
       # You might want to implement a function for "Both" here
     }
-  } #Subset by Data Type
-  {
-    if (is.null(model_type)){
-      data <- data$linear # Default to Linear
-      model_type <- "Linear"
-    } else if (grepl('Linear', model_type, ignore.case = TRUE)){
-      data <- data$linear # Assign Linear
-      model_type <- "Linear"
-    } else if (grepl('Interact', model_type, ignore.case = TRUE)){
-      data <- data$interact # Assign Interaction
-      model_type <- 'Interaction'
-    } else if (grepl('Square', model_type, ignore.case = TRUE)){
-      data <- data$square # Assign Square
-      model_type <- 'Square'
-    } else if (grepl('polysmall', model_type, ignore.case = TRUE)){
-      data <- data$polySmall # Assign Polynomial
-      model_type <- 'PolySmall'
-    } else if (grepl('poly', model_type, ignore.case = TRUE)){
-      data <- data$poly # Assign Poly(Small)
-      model_type <- 'Poly'
-    } else if (grepl('exp', model_type, ignore.case = TRUE)){
-      data <- data$exp # Assign Exponential
-      model_type <- 'Exponential'
-    } else if (grepl('abs', model_type, ignore.case = TRUE)){
-      data <- data$abs # Assign Abs
-      model_type <- 'Abs'
-    } else if (grepl('sin', model_type, ignore.case = TRUE)){
-      data <- data$sin # Assign Sin
-      model_type <- 'Sin'
-    } else if (grepl('mono', model_type, ignore.case = TRUE)){
-      data <- data$mono # Assign Monotonic
-      model_type <- 'Monotonic'
+    {
+      if (is.null(model_type)){
+        data <- data$linear # Default to Linear
+        model_type <- "Linear"
+      } else if (grepl('Linear', model_type, ignore.case = TRUE)){
+        data <- data$linear # Assign Linear
+        model_type <- "Linear"
+      } else if (grepl('Interact', model_type, ignore.case = TRUE)){
+        data <- data$interact # Assign Interaction
+        model_type <- 'Interaction'
+      } else if (grepl('Square', model_type, ignore.case = TRUE)){
+        data <- data$square # Assign Square
+        model_type <- 'Square'
+      } else if (grepl('polysmall', model_type, ignore.case = TRUE)){
+        data <- data$polySmall # Assign Polynomial
+        model_type <- 'PolySmall'
+      } else if (grepl('poly', model_type, ignore.case = TRUE)){
+        data <- data$poly # Assign Poly(Small)
+        model_type <- 'Poly'
+      } else if (grepl('exp', model_type, ignore.case = TRUE)){
+        data <- data$exp # Assign Exponential
+        model_type <- 'Exponential'
+      } else if (grepl('abs', model_type, ignore.case = TRUE)){
+        data <- data$abs # Assign Abs
+        model_type <- 'Abs'
+      } else if (grepl('sin', model_type, ignore.case = TRUE)){
+        data <- data$sin # Assign Sin
+        model_type <- 'Sin'
+      } else if (grepl('mono', model_type, ignore.case = TRUE)){
+        data <- data$mono # Assign Monotonic
+        model_type <- 'Monotonic'
+      }
+
+    } #Subset by Model Type
+
+    {
+      temp <- test$bin$linear$acc.ch %>%
+        mutate(var_numeric = as.numeric(factor(var)))
+
+      temp_figure <- ggplot(data = temp, aes(x = var_numeric, y = fit_change)) +
+        geom_rect(aes(xmin = var_numeric - 0.15, xmax = var_numeric + 0.15,
+                      ymin = min_change, ymax = max_change, fill = 'Range of Predicted Accuracy from Placebos'),
+                  color = 'black') +
+        geom_point(aes(color = 'Prediction from Model Fit After Dropping Information'), size = 2.5) +
+        geom_hline(yintercept = 0, linetype = 2) +
+        scale_fill_manual(values = 'gray', name = NULL) +
+        scale_color_manual(values = 'gray5', name = NULL) +
+        scale_x_continuous(breaks = seq(min(t$var_numeric), max(t$var_numeric), 1), labels = t$var) +
+        theme_minimal() +
+        theme_test(base_size = 14) +
+        labs(
+          x = '\n',
+          y = 'Change in Predicted Accuracy\nWith All True Data\n') +
+        theme(
+          axis.text = element_text(size = 14),
+          panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+          legend.title.align = 0.5,
+          legend.text.align = 0.25,
+          legend.title = element_blank(),
+          legend.text = element_text(size = 12, color = "gray5"),
+          legend.position = "bottom",
+          strip.text = element_text(size = 14, face = "bold"),
+          strip.background = element_rect(fill = "gray", color = "gray5"),
+          plot.title = element_text(size = 18, face = "bold"),
+          plot.subtitle = element_text(size = 15),
+          plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
+
+      return(temp_figure)
+
+    } #Return Figure
+
+
+
+  } else if(plot_type == 'Steps'){
+    {
+      if (is.null(data_type)) {
+        # Default to Binomial
+        data_type <- ifelse(data[1] == 'cont', 'Continuous', 'Binomial')
+        data <- data[[1]]
+      } else if (data_type == "Binomial") {
+        # Assign Binomial
+        data_type == "Binomial"
+        data <- data$bin
+      } else if (data_type == "Continuous") {
+        # Assign Continuous
+        data_type == 'Continuous'
+        data <- data$cont
+      } else if (data_type == "Both") {
+        stop('Need to implement a function for "Both"')
+        # You might want to implement a function for "Both" here
+      }
+    } #Subset by Data Type
+    {
+      if (is.null(model_type)){
+        data <- data$linear # Default to Linear
+        model_type <- "Linear"
+      } else if (grepl('Linear', model_type, ignore.case = TRUE)){
+        data <- data$linear # Assign Linear
+        model_type <- "Linear"
+      } else if (grepl('Interact', model_type, ignore.case = TRUE)){
+        data <- data$interact # Assign Interaction
+        model_type <- 'Interaction'
+      } else if (grepl('Square', model_type, ignore.case = TRUE)){
+        data <- data$square # Assign Square
+        model_type <- 'Square'
+      } else if (grepl('polysmall', model_type, ignore.case = TRUE)){
+        data <- data$polySmall # Assign Polynomial
+        model_type <- 'PolySmall'
+      } else if (grepl('poly', model_type, ignore.case = TRUE)){
+        data <- data$poly # Assign Poly(Small)
+        model_type <- 'Poly'
+      } else if (grepl('exp', model_type, ignore.case = TRUE)){
+        data <- data$exp # Assign Exponential
+        model_type <- 'Exponential'
+      } else if (grepl('abs', model_type, ignore.case = TRUE)){
+        data <- data$abs # Assign Abs
+        model_type <- 'Abs'
+      } else if (grepl('sin', model_type, ignore.case = TRUE)){
+        data <- data$sin # Assign Sin
+        model_type <- 'Sin'
+      } else if (grepl('mono', model_type, ignore.case = TRUE)){
+        data <- data$mono # Assign Monotonic
+        model_type <- 'Monotonic'
+      }
+
+    } #Subset by Model Type
+
+    figures <- list()
+
+    for (var in variables){
+      temp <- data.frame(data$push[var])
+      names(temp) <- gsub(paste0(var, "\\."), '', names(temp))
+
+      importance_with <- round(data$variable_importance_with[var], 2)
+      importance_without <- round(data$variable_importance_without[var], 2)
+
+      temp_data <- tidyr::gather(temp, key = "variable", value = "value", -steps)
+
+      temp_figure <- ggplot(data = temp_data, aes(x = steps, y = value)) +
+        stat_smooth(method = 'lm', geom = 'smooth', formula = y ~ x, se = FALSE, size = 1, colour = 'deepskyblue3') +
+        theme_minimal() +
+        geom_hline(yintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
+        geom_vline(xintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
+        labs(title = var,
+             subtitle = paste0(model_type, ' Model'),
+             caption = paste0('\nVariable Importance: ', as.numeric(importance_with), ' (With) & ', as.numeric(importance_without), ' (Without)')) +
+        theme(
+          axis.text = element_text(size = 14),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+          legend.title.align = 0.5,
+          legend.text.align = 0.25,
+          legend.title = element_blank(),
+          legend.text = element_text(size = 15, color = "gray5"),
+          legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
+          legend.position = "bottom",
+          strip.text = element_text(size = 14, face = "bold"),
+          strip.background = element_rect(fill = "gray", color = "gray5"),
+          plot.title = element_text(size = 18, face = "bold"),
+          plot.subtitle = element_text(size = 15),
+          plot.caption = element_text(size = 12, hjust = 0, face = 'italic'),
+          plot.background = element_rect(size = 1, colour = 'gray5', fill = NA))
+
+
+
+      if (plot_points == TRUE){
+        temp_figure <- temp_figure + geom_point(alpha = 1/10)
+      }
+
+
+      figures[[var]] <- temp_figure
+
     }
-
-  } #Subset by Model Type
-
-  figures <- list()
-
-  for (var in variables){
-    temp <- data.frame(data$push[var])
-    names(temp) <- gsub(paste0(var, "\\."), '', names(temp))
-
-    importance_with <- round(data$variable_importance_with[var], 2)
-    importance_without <- round(data$variable_importance_without[var], 2)
-
-    temp_data <- tidyr::gather(temp, key = "variable", value = "value", -steps)
-
-    temp_figure <- ggplot(data = temp_data, aes(x = steps, y = value)) +
-      stat_smooth(method = 'lm', geom = 'smooth', formula = y ~ x, se = FALSE, size = 1, colour = 'deepskyblue3') +
-      theme_minimal() +
-      geom_hline(yintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
-      geom_vline(xintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
-      labs(title = var,
-           subtitle = paste0(model_type, ' Model'),
-           caption = paste0('\nVariable Importance: ', as.numeric(importance_with), ' (With) & ', as.numeric(importance_without), ' (Without)')) +
-      theme(
-        axis.text = element_text(size = 14),
-        axis.title.x = element_blank(),
-        axis.title.y = element_blank(),
-        panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
-        legend.title.align = 0.5,
-        legend.text.align = 0.25,
-        legend.title = element_blank(),
-        legend.text = element_text(size = 15, color = "gray5"),
-        legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
-        legend.position = "bottom",
-        strip.text = element_text(size = 14, face = "bold"),
-        strip.background = element_rect(fill = "gray", color = "gray5"),
-        plot.title = element_text(size = 18, face = "bold"),
-        plot.subtitle = element_text(size = 15),
-        plot.caption = element_text(size = 12, hjust = 0, face = 'italic'),
-        plot.background = element_rect(size = 1, colour = 'gray5', fill = NA))
-
-
-
-    if (plot_points == TRUE){
-      temp_figure <- temp_figure + geom_point(alpha = 1/10)
-    }
-
-
-    figures[[var]] <- temp_figure
-
+    yleft <- textGrob("\nEffect on Outcome\n", rot = 90, gp = gpar(fontsize = 15))
+    bottom <- textGrob("\nSteps\n",  gp = gpar(fontsize = 15))
+    uni <-  grid.arrange(grobs = figures, left = yleft, bottom = bottom)
+    return(uni)
   }
-  yleft <- textGrob("\nEffect on Outcome\n", rot = 90, gp = gpar(fontsize = 15))
-  bottom <- textGrob("\nSteps\n",  gp = gpar(fontsize = 15))
-  uni <-  grid.arrange(grobs = figures, left = yleft, bottom = bottom)
-  return(uni)
+
+
+
 
 
 }
@@ -1005,20 +1105,8 @@ pai_plot_BASE_flexible <- function(data,
 pai_plot_BASE_flexible(test,
                        data_type = 'Binomial',
                        model_type = "Linear",
-                       variables = c('var1'),
+                       plot_type = 'Placebo',
                        plot_points = FALSE)
 
 
-
-test$cont$linear$acc.ch$var1$placebo$model$pred
-
-sandbox.models <- test
-
-continuous_results <- sandbox.models$cont$linear
-continuous_predictors <- continuous_results$var
-
-continuous_accuracy_results <- lapply(continuous_predictors, function(var) {
-  result <- continuous_results$acc.ch[[var]]
-  data.frame(Variable = var, With = result$with.acc, Without = result$wo.acc, Difference = result$dif)
-})
 
