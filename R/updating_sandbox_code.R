@@ -812,6 +812,7 @@ pai_main <- function(data, #Dataframe
 
 
 
+
 ################################################################################
 #Function Parameters
 #     data = Data Frame
@@ -845,23 +846,38 @@ test <- pai_main(data = test_data,
                  ml = c("Random Forest", 8),
                  seed = 1234)
 
-data = test_data
-outcome = "y"
-predictors = c("var1", "var2", "var3")
-model = NULL
-ml = c("Random Forest", 8)
-seed = 1234
 
 
+t <- test$bin$linear$acc.ch %>%
+  mutate(var_numeric = as.numeric(factor(var)))
 
-
-test$bin$linear$acc.ch %>%
-  ggplot(aes(x = var, y = fit_change)) +
-  geom_crossbar(aes(ymin = min_change, ymax = max_change), fill = 'gray') +
+ggplot(data = t, aes(x = var_numeric, y = fit_change)) +
+  geom_rect(aes(xmin = var_numeric - 0.15, xmax = var_numeric + 0.15,
+                ymin = min_change, ymax = max_change, fill = 'Range of Predicted Accuracy from Placebos'),
+            color = 'black') +
+  geom_point(aes(color = 'Prediction from Model Fit After Dropping Information'), size = 2.5) +
   geom_hline(yintercept = 0, linetype = 2) +
-  theme_test(base_size = 16)
-
-
+  scale_fill_manual(values = 'gray', name = NULL) +
+  scale_color_manual(values = 'gray5', name = NULL) +
+  scale_x_continuous(breaks = seq(min(t$var_numeric), max(t$var_numeric), 1), labels = t$var) +
+  theme_minimal() +
+  theme_test(base_size = 14) +
+  labs(
+    x = '\n',
+    y = 'Change in Predicted Accuracy\nWith All True Data\n') +
+  theme(
+    axis.text = element_text(size = 14),
+    panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+    legend.title.align = 0.5,
+    legend.text.align = 0.25,
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12, color = "gray5"),
+    legend.position = "bottom",
+    strip.text = element_text(size = 14, face = "bold"),
+    strip.background = element_rect(fill = "gray", color = "gray5"),
+    plot.title = element_text(size = 18, face = "bold"),
+    plot.subtitle = element_text(size = 15),
+    plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
 
 
