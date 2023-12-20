@@ -304,9 +304,7 @@ pai_main <- function(data, #Dataframe
 
 
     if(is.na(ml[1])){
-      ml[1] <- "Random Forest"
-    } else if (ml[1] %in% c('Random Forest', 'random forest', 'rf')) {
-      ml[1] <- "Random Forest"
+      ml[1] <- 'rf'
     } #Declare ml
 
     if (is.na(ml[2])) {
@@ -387,6 +385,8 @@ pai_main <- function(data, #Dataframe
       } #Combine to DF
       {
 
+        ml_model <- ml[1]
+
         runpred.bin <- function(mod, var, stepper, dat){
           dat[[var]] <- dat[[var]] + stepper
           pred <- predict(mod, dat)
@@ -426,48 +426,44 @@ pai_main <- function(data, #Dataframe
           tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
           replications <- 5
-          count <- 1
           placebos <- data.frame()
 
-          for (rep_count in 1:replications){
-            placebo_accuracy <- replicate(1, {
-              shuffle_data <- d.train
+          variables <- setdiff(names(d.test), "y")
 
-              capture_output_mod.placebo <- capture.output({mod.placebo <- suppressWarnings(
-                train(factor(y) ~ .,
-                      data=shuffle_data,
-                      method = "parRF",
-                      trControl = tc,
-                      importance=TRUE))})
+          for (rep_count in 1:replications) {
+            for (variable in variables) {
+              capture_output_original_accuracy <- capture.output({ original_accuracy <- train(factor(y) ~ .,
+                                                                                              data = d.test,
+                                                                                              method = as.character(ml[1]),
+                                                                                              trControl = tc) })
+              original_accuracy <- original_accuracy$results$Accuracy
 
-              # Store model output for each iteration of the placebo test
-              list(model = mod.placebo)
+              shuffle_data <- d.test
+              shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
 
-            })
+              capture_output_shuffled_accuracy <- capture.output({shuffled_accuracy <- train(factor(y) ~ .,
+                                                                                             data = shuffle_data,
+                                                                                             method = as.character(ml[1]),
+                                                                                             trControl = tc) })
+              shuffled_accuracy <- shuffled_accuracy$results$Accuracy
 
-            change = placebo_accuracy$model$finalModel$importance[,1] #Change in %IncMSE
-            change = t(data.frame(change))
+              accuracy_change <- original_accuracy - shuffled_accuracy
 
-
-            if (count %% 10 == 0){
-              cat(paste0("            Completed ", count, " Iterations\n"))
+              placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
+              placebos <- bind_rows(placebos, placebo_temp)
             }
 
-            count <- count + 1
-
-            placebo_temp <- data.frame(cbind(rep_count, change))
-
-            placebos <- bind_rows(placebos, placebo_temp)
+            if (rep_count %% 5){
+              cat(paste0('           Completed Iteration ', rep_count, '\n'))
+            }
 
           }
-
-
 
           return(placebos)
 
         }
 
-        dropping_vars <- function(mod.with, predictors, d.train){
+        dropping_vars <- function(mod.with, predictors, d.test){
 
           message("    Beginning Variable Omission Protocol...")
 
@@ -475,14 +471,14 @@ pai_main <- function(data, #Dataframe
 
           for (var in predictors){
 
-            data_without_var <- d.train %>%
+            data_without_var <- d.test %>%
               select(-var)
 
             tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
             capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
               train(factor(y) ~ .,
-                    method = "parRF",
+                    method = as.character(ml_model),
                     data= data_without_var,
                     trControl = tc,
                     importance=TRUE,
@@ -517,7 +513,7 @@ pai_main <- function(data, #Dataframe
 
           capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
             train(factor(y) ~ .,
-                  method = "parRF",
+                  method = as.character(ml_model),
                   data=d.train,
                   trControl = tc,
                   importance=TRUE,
@@ -536,13 +532,13 @@ pai_main <- function(data, #Dataframe
 
           placebo <- placebo_base %>%
             select(-rep_count) %>%
-            tidyr::pivot_longer(cols = starts_with("var"), names_to = "var") %>%
+            rename(var = variable) %>%
             group_by(var) %>%
-            summarize(min_change = quantile(value, 0.025),
-                      max_change = quantile(value, 0.975))
+            summarize(min_change = quantile(accuracy_change, 0.025),
+                      max_change = quantile(accuracy_change, 0.975))
 
 
-          fit_change <- dropping_vars(mod.with, predictors, d.train)
+          fit_change <- dropping_vars(mod.with, predictors, d.test)
 
           fit_assess <- left_join(placebo, fit_change, by = 'var')
 
@@ -655,7 +651,7 @@ pai_main <- function(data, #Dataframe
 
           for (rep_count in 1:replications){
             placebo_accuracy <- replicate(1, {
-              shuffle_data <- d.train
+              shuffle_data <- d.test
 
               capture_output_mod.placebo <- capture.output({mod.placebo <- suppressWarnings(
                 train(y ~ .,
@@ -690,7 +686,7 @@ pai_main <- function(data, #Dataframe
           return(placebos)
 
         }
-        dropping_vars <- function(mod.with, predictors, d.train){
+        dropping_vars <- function(mod.with, predictors, d.test){
 
           message("    Beginning Variable Omission Protocol...")
 
@@ -698,7 +694,7 @@ pai_main <- function(data, #Dataframe
 
           for (var in predictors){
 
-            data_without_var <- d.train %>%
+            data_without_var <- d.test %>%
               select(-var)
 
             tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
@@ -845,11 +841,18 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  model = NULL,
-                 ml = c("Random Forest", 8),
+                 ml = c("rf", 8),
                  seed = 1234)
 
+data = test_data
+outcome = "y"
+predictors = c("var1", "var2", "var3")
+model = NULL
+ml = c("nnet", 8)
+seed = 1234
 
-`################################################################################
+
+################################################################################
 #Plot Sample Output
 ################################################################################
 
@@ -930,7 +933,7 @@ pai_plot_BASE_flexible <- function(data,
         geom_hline(yintercept = 0, linetype = 2) +
         scale_fill_manual(values = 'gray', name = NULL) +
         scale_color_manual(values = 'gray5', name = NULL) +
-        scale_x_continuous(breaks = seq(min(t$var_numeric), max(t$var_numeric), 1), labels = t$var) +
+        scale_x_continuous(breaks = seq(min(temp$var_numeric), max(temp$var_numeric), 1), labels = temp$var) +
         theme_minimal() +
         theme_test(base_size = 14) +
         labs(
@@ -1078,5 +1081,9 @@ pai_plot_BASE_flexible(test,
                        plot_type = 'Placebo',
                        plot_points = FALSE)
 
-
+data = test
+data_type = 'Binomial'
+model_type = "Linear"
+plot_type = 'Placebo'
+plot_points = FALSE
 
