@@ -837,11 +837,11 @@ pai_main <- function(data, #Dataframe
 ################################################################################
 
 set.seed(1234)
-test_data <- data.frame(y = sample(c(1:100), 1000, replace = TRUE),
-                   var1 = rnorm(1000, mean = 25, sd = 1),
-                   var2 = rnorm(1000, mean = 75, sd = 1),
-                   var3 = rnorm(1000, mean = 3, sd = 2),
-                   var4 = rnorm(1000, mean = 100, sd = 1))
+test_data <- data.frame(y = rnorm(1000, mean = 1, sd = 1),
+                   var1 = rnorm(1000, mean = 15, sd = 1),
+                   var2 = rnorm(1000, mean = 10, sd = 1),
+                   var3 = rnorm(1000, mean = 5, sd = 2),
+                   var4 = rnorm(1000, mean = 30, sd = 1))
 
 
 test <- pai_main(data = test_data,
@@ -851,12 +851,7 @@ test <- pai_main(data = test_data,
                  ml = c("rf", 8, 3),
                  seed = 1234)
 
-data = test_data
-outcome = "y"
-predictors = c("var1", "var2", "var3")
-model = NULL
-ml = c("nnet", 8, 1)
-seed = 1234
+
 
 ################################################################################
 #Plot Sample Output
@@ -864,10 +859,10 @@ seed = 1234
 
 
 pai_plot_BASE_flexible <- function(data,
-                                   data_type = NULL,
-                                   model_type = NULL,
-                                   plot_type = NULL,
-                                   variables = NULL,
+                                   data_type = NULL, #Continuous or Binomial
+                                   model_type = NULL, #Linear
+                                   plot_type = NULL, #Placebo or Steps
+                                   variables = NULL, #Variables to Declare (Null Default = All)
                                    plot_points = FALSE) {
 
   if(is.null(plot_type)){
