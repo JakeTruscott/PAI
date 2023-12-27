@@ -12,263 +12,13 @@
 library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork)
 
 ################################################################################
-#Develop Sandbox Data
-################################################################################
-
-{
-  set.seed(1234) #Set Random Seed Generator
-  seed <- 1234
-  numCores <- parallel::detectCores()/2 #Generate Core Allocation (Adjust as Necessary)
-
-  {
-    numvars = 10
-    train.set = 200
-    test.set = 50
-    obs = test.set + train.set
-    sd = 1
-
-    betas <- rnorm(numvars, sd=sd)
-    exes <- matrix(rnorm(numvars*obs, sd=sd), ncol = numvars)
-
-    noise <- rnorm(obs)
-    ystar0 <- (betas %*% t(exes))[1,] + noise
-    ydisc <- 1*(ystar0>0)
-
-  } #Base Parameters
-  {
-    x0 <- rnorm(obs)
-    ystar <- ystar0 + 2*x0
-    ydisc0 <- 1*(ystar>0)
-    ystar.lin <- ystar
-  } #Linear Variables
-  {
-    x1 <- rnorm(obs, 1, 1)
-    x2 <- rnorm(obs,1,1)
-    intereact.beta = 10
-    ystar <- ystar0 + intereact.beta*x1*x2
-    ydisc1 <- 1*(ystar>0)
-    ystar.inter <- ystar
-  } #Interaction Term
-  {
-    x3 <- rnorm(obs)
-    ystar <- ystar0 + 3*x3^2
-    ydisc2 <- 1*(ystar>0)
-    ystar.sq <- ystar
-  } #Square Term
-  {
-    x4 <- rnorm(obs)
-    x5 <- rnorm(obs)
-
-    ystar <- ystar0 + 2*x4^3 - 6*x5^5
-    ydisc3 <- 1*(ystar>0)
-    ystar.poly <- ystar
-
-    x6 <- rnorm(obs)
-
-    ystar <- ystar0 + 2^x6
-    ydisc4 <- 1*(ystar>0)
-    ystar.exp <- ystar
-
-  } #Higher-Order Polynomials
-  {
-    x7 <- rnorm(obs)
-
-    ystar <- ystar0 + abs(x7)
-    ydisc5 <- 1*(ystar>0)
-    ystar.abs <- ystar
-  } #Continuous Effect
-  {
-    x8 <- rnorm(obs)
-
-    ystar <- ystar0 + sin(x8*pi)
-    ydisc6 <- 1*(ystar>0)
-    ystar.sin <- ystar
-  } #Add Sin
-  { x9 <- rnorm(obs)
-    x9.1 <- x9
-    x9.1[x9.1 > quantile(x9.1,.2) & x9.1 < quantile(x9.1,.4)] = quantile(x9.1,.2)
-    x9.1[x9.1 > quantile(x9.1,.6) & x9.1 < quantile(x9.1,.8)] = quantile(x9.1,.6)
-
-    ystar <- ystar0 + 4*x9.1
-    ydisc7 <- 1*(ystar>0)
-    ystar.mono <- ystar
-  } #Weekly Monotonic Effect
-  {
-    ch0 <- sum(1*(ydisc != ydisc0))
-    ch1 <- sum(1*(ydisc != ydisc1))
-    ch2 <- sum(1*(ydisc != ydisc2))
-    ch3 <- sum(1*(ydisc != ydisc3))
-    ch4 <- sum(1*(ydisc != ydisc4))
-    ch5 <- sum(1*(ydisc != ydisc5))
-    ch6 <- sum(1*(ydisc != ydisc6))
-    ch7 <- sum(1*(ydisc != ydisc7))
-
-    changes <- c(ch0, ch1, ch2, ch3, ch4, ch5, ch6, ch7)
-  } #Track How Dichotomous Observations Changed w/ Each Step
-  {
-    changes <- c(ch0, ch1, ch2, ch3, ch4, ch5, ch6, ch7)
-
-    X <- as.data.frame(cbind(exes, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9))
-    X.train <- X[seq(train.set),]
-    X.test <- X[-seq(train.set),]
-  } #Combine to DF
-
-} #Sandbox Data
-
-################################################################################
-#Functions
-################################################################################
-
-{
-  runpred <- function(mod, var, stepper, dat){
-    dat[[var]] <- dat[[var]] + stepper
-    pred <- predict(mod, dat)
-    true <- dat$y
-    onecount <- length(which(pred == '1')) / length(true)
-    acc <- length(which(pred == true)) / length(true)
-    return(c(onecount, acc))
-  }
-
-  runpred.bin <- function(mod, var, stepper, dat){
-    dat[[var]] <- dat[[var]] + stepper
-    pred <- predict(mod, dat)
-    true <- dat$y
-    dif <- pred - true
-    return(dif)
-  }
-
-  acc.imp <- function(w, wo, w.dat, wo.dat, y){
-    pred.w <- predict(w, w.dat)
-    pred.wo <- predict(wo, wo.dat)
-    w.acc <- sum(1 * (pred.w == y)) / length(y)
-    wo.acc <- sum(1 * (pred.wo == y)) / length(y)
-    imp.list <- list(w.acc = w.acc, wo.acc = wo.acc, dif = w.acc - wo.acc)
-    return(imp.list)
-  }
-
-  push.bin <- function(l){
-    x = l$var
-    Z = l$with.test
-    sdx <- sd(Z[, x])
-    steps <- seq(-2 * sdx, 2 * sdx, (4 * sdx) / 100)
-    tester <- lapply(steps, function(z) runpred(l$with, x, z, Z))
-    t <- cbind(steps, t(list.cbind(tester)))
-    return(t)
-  }
-
-  thisforest.bin <- function(y, x, p, Z = X, ntrain = train.set){
-    set.seed(254)
-    true.beta <- betas[x + 1]
-    x = x + numvars + 2
-    p = p + numvars + 2
-    y = as.factor(y)
-
-    set.seed(seed)
-    registerDoParallel(numCores)
-    folds <- 5
-    d <- cbind(y, Z)
-    d = as.data.frame(d)
-    names(d)[1] = 'y'
-    d$y <- as.factor(d$y)
-    d.train <- d[seq(ntrain), ]
-    d.test <- d[-seq(ntrain), ]
-    tc <- trainControl(method = 'oob',
-                       savePredictions = TRUE)
-    mod.with <- train(y ~ ., method = "parRF", data = d.train,
-                      trControl = tc, importance = TRUE,
-                      localImp = TRUE)
-    rf.basic <- randomForest(y ~ .,  data = d.train,
-                             na.action = "na.omit",
-                             ntree = 1000, nodesize = 4, importance = TRUE,
-                             localImp = TRUE)
-    without.d.train <- d.train
-    without.d.train[, x] = 0
-    without.d.test <- d.test
-    without.d.test[, x] = 0
-    mod.without <- train(y ~ ., data = without.d.train, method = "parRF",
-                         trControl = tc, importance = TRUE)
-    acc.ch <- acc.imp(mod.with, mod.without, d.test, without.d.test, d.test$y)
-    olist <- list(with = mod.with, without = mod.without,
-                  with.test = d.test, without.test = without.d.test,
-                  X = X, var = p, training.data.with = d.train,
-                  baseRF = rf.basic, acc.imp = acc.ch$dif)
-    pusher <- push.bin(olist)
-    olist$push = pusher
-    modal <- max(table(d.test$y)) / sum(table(d.test$y))
-    olist$outrow <- c(modal, acc.ch$w.acc, acc.ch$wo.acc)
-
-    return(olist)
-  }
-
-  runpred.cont <- function(mod, var, stepper, dat){
-    dat[[var]] <- dat[[var]] + stepper
-    pred <- predict(mod, dat)
-    true <- dat$y
-    dif <- pred - true
-    return(dif)
-  }
-
-  push.cont <- function(l){
-    x = l$var
-    Z = l$with.test
-    sdx <- sd(Z[, x])
-    steps <- seq(-2 * sdx, 2 * sdx, (4 * sdx) / 100)
-    tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z))
-    t <- cbind(steps, t(list.cbind(tester)))
-    return(t)
-  }
-
-  thisforest.cont <- function(y, x, p, Z = X, ntrain = train.set){
-    set.seed(254)
-    true.beta <- betas[x + 1]
-    x = x + numvars + 2
-    p = p + numvars + 2
-
-    set.seed(seed)
-    registerDoParallel(numCores)
-    folds <- 5
-    d <- cbind(y, Z)
-    d = as.data.frame(d)
-    names(d)[1] = 'y'
-    d.train <- d[seq(ntrain), ]
-    d.test <- d[-seq(ntrain), ]
-    tc <- trainControl(method = 'oob',
-                       savePredictions = TRUE)
-    mod.with <- train(y ~ ., method = "ranger", data = d.train,
-                      trControl = tc)
-
-    without.d.train <- d.train
-    without.d.train[, x] = 0
-    without.d.test <- d.test
-    without.d.test[, x] = 0
-    mod.without <- train(y ~ ., data = without.d.train, method = "ranger",
-                         trControl = tc)
-    pred.w <- predict(mod.with, d.test)
-    pred.wo <- predict(mod.without, without.d.test)
-
-    olist <- list(with = mod.with, without = mod.without,
-                  with.test = d.test, without.test = without.d.test,
-                  X = X, var = p, training.data.with = d.train,
-                  kiv = d.test[, x],
-                  pred.w = pred.w, pred.wo = pred.wo, test.y = d.test$y)
-    pusher <- push.cont(olist)
-    olist$push = pusher
-
-    return(olist)
-  }
-
-} #All Functions (Binomial & Cont)
-
-################################################################################
 #Develop Main Function -- Flexible w/ Multiple IV Allotment
-#Just Random Forest
-#Just Binomial
-#Just Linear
 ################################################################################
 
 pai_main <- function(data, #Dataframe
                      outcome = NULL, #Character or Character Vector (Required)
                      predictors = NULL, #Character or Character Vector (Optional - Default to 'all' Except DV)
+                     interactions = NULL, #Character Vector (Optional - Default to Null -- Indicate as Single Character with term(s) separated by '*' -- Ex: 'var1*var2')
                      model = NULL, #Model Type ("Linear") or Vector of Models (Default to Linear)
                      ml = c(NA, NA, NA), #Vector List of ML Model (Character) + Cores (Numeric) (Optional - Default to RF & 2) + # of Placebo Iterations
                      seed = NULL){ #Numeric Seed (Optional - Default to 1234)
@@ -295,6 +45,22 @@ pai_main <- function(data, #Dataframe
         message("    Predictors = ", predictors)
       }
     } #Print Message for IVs
+
+    if (is.null(interactions)){
+      message("    Interactions = None")
+    } else {
+
+      print_interactions <- c()
+      for (interaction in 1:length(interactions)){
+        temp_interaction <- paste0("[", interaction, "] ", interactions[interaction])
+        print_interactions[interaction] <- temp_interaction
+      }
+
+
+      message("    Interactions = ", paste(print_interactions, collapse = '\n                   '))
+
+    }
+
 
     if(is.null(model)){
       model = "linear"
@@ -359,450 +125,374 @@ pai_main <- function(data, #Dataframe
 
   sandbox.models <- list()
 
+  ml_model <- ml[1]
+  placebo_iterations <- as.numeric(ml[3])
+  train.set <- round(length(dat[[outcome]])/5, 0)
+  outcome_var <- dat[outcome]
+
+  {
+
+    runpred.bin <- function(mod, var, stepper, dat){
+      dat[[var]] <- dat[[var]] + stepper
+      pred <- predict(mod, dat)
+      true <- as.factor(dat$y)  # Ensure true is a factor
+      dif <- as.numeric(pred) - as.numeric(true)  # Convert factor to numeric for calculation
+      return(dif)
+    }
+    runpred.cont <- function(mod, var, stepper, dat){
+      dat[[var]] <- dat[[var]] + stepper
+      pred <- predict(mod, dat)
+      true <- dat$y
+      dif <- pred - true
+      return(dif)
+    }
+
+    acc.imp.bin <- function(w, wo, w.dat, wo.dat, y){
+      pred.w <- predict(w, w.dat)
+      pred.wo <- predict(wo, wo.dat)
+      w.acc <- sum(1 * (pred.w == y)) / length(y)
+      wo.acc <- sum(1 * (pred.wo == y)) / length(y)
+      imp.list <- list(w.acc = w.acc, wo.acc = wo.acc, dif = w.acc - wo.acc)
+      return(imp.list)
+    }
+    acc.imp.cont <- function(w, wo, w.dat, wo.dat, y){
+      pred.w <- predict(w, w.dat)
+      pred.wo <- predict(wo, wo.dat)
+      w.acc <- sum(1*(pred.w==y)) / length(y)
+      wo.acc <- sum(1*(pred.wo==y)) / length(y)
+      imp.list <- list(w.acc=w.acc, wo.acc=wo.acc, dif=w.acc-wo.acc)
+      return(imp.list)
+    }
+
+    push.bin <- function(l){
+      t <- list()
+
+      for (v in 1:length(l$var)){
+        x = l$var[v]
+        Z = l$with.test
+        sdx <- sd(Z[,x])
+        steps <- seq(-2*sdx, 2*sdx, (4*sdx)/100)
+        tester <- lapply(steps, function(z) runpred.bin(l$with, x, z, Z ))
+        temp <- cbind(steps, t(list.cbind(tester)))
+        t[[x]] <- temp
+      }
+
+      return(t)
+    }
+    push.cont <- function(l){
+      t <- list()
+
+      for (v in 1:length(l$var)){
+        x = l$var[v]
+        Z = l$with.test
+        sdx <- sd(Z[,x])
+        steps <- seq(-2*sdx, 2*sdx, (4*sdx)/100)
+        tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z ))
+        temp <- cbind(steps, t(list.cbind(tester)))
+        t[[x]] <- temp
+      }
+
+      return(t)
+    }
+
+    placebo_shuffle.bin <- function(w, d.train, d.test){
+      message("    Beginning Placebo Protocol...")
+
+      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+      replications <- placebo_iterations
+      placebos <- data.frame()
+
+      variables <- setdiff(names(d.test), "y")
+
+      for (rep_count in 1:replications) {
+        for (variable in variables) {
+          capture_output_original_accuracy <- capture.output({ original_accuracy <- train(factor(y) ~ .,
+                                                                                          data = d.test,
+                                                                                          method = as.character(ml[1]),
+                                                                                          trControl = tc) })
+          original_accuracy <- original_accuracy$results$Accuracy
+
+          shuffle_data <- d.test
+          shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
+
+          capture_output_shuffled_accuracy <- capture.output({shuffled_accuracy <- train(factor(y) ~ .,
+                                                                                         data = shuffle_data,
+                                                                                         method = as.character(ml[1]),
+                                                                                         trControl = tc) })
+          shuffled_accuracy <- shuffled_accuracy$results$Accuracy
+
+          accuracy_change <- original_accuracy - shuffled_accuracy
+
+          placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
+          placebos <- bind_rows(placebos, placebo_temp)
+        }
+
+        if (rep_count %% 5){
+          cat(paste0('           Completed Iteration ', rep_count, '\n'))
+        }
+
+      }
+
+      return(placebos)
+
+    }
+    placebo_shuffle.cont <- function(w, d.train, d.test){
+      message("    Beginning Placebo Protocol...")
+
+      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+      replications <- placebo_iterations
+      placebos <- data.frame()
+
+      variables <- setdiff(names(d.test), "y")
+
+      for (rep_count in 1:replications) {
+        for (variable in variables) {
+          capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(y ~ .,
+                                                                                                           data = d.test,
+                                                                                                           method = as.character(ml[1]),
+                                                                                                           trControl = tc)) })
+          original_accuracy <- original_accuracy$results$RMSE
+
+          shuffle_data <- d.test
+          shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
+
+          capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(y ~ .,
+                                                                                                            data = shuffle_data,
+                                                                                                            method = as.character(ml[1]),
+                                                                                                            trControl = tc) )})
+          shuffled_accuracy <- shuffled_accuracy$results$RMSE
+
+          accuracy_change <- original_accuracy - shuffled_accuracy
+
+          placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
+          placebos <- bind_rows(placebos, placebo_temp)
+        }
+
+        if (rep_count %% 5){
+          cat(paste0('           Completed Iteration ', rep_count, '\n'))
+        }
+
+      }
+
+      return(placebos)
+
+    }
+
+    dropping_vars.bin <- function(mod.with, predictors, d.test){
+
+      message("    Beginning Variable Omission Protocol...")
+
+      fit_change <- data.frame()
+
+      for (var in predictors){
+
+        data_without_var <- d.test %>%
+          select(-all_of(var))
+
+        tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+        capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
+          train(factor(y) ~ .,
+                method = as.character(ml_model),
+                data= data_without_var,
+                trControl = tc,
+                importance=TRUE,
+                localImp=TRUE))})
+
+        RMSE_drop_var <- max(mod.without_var$results$Accuracy)
+        original_RMSE <- mod.with$results$Accuracy[1]
+        change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
+
+        fit_change <- bind_rows(fit_change, change)
+
+        cat(paste0('           Completed Var: ', var, '\n'))
+
+      }
+
+      return(fit_change)
+
+    }
+    dropping_vars.cont <- function(mod.with, predictors, d.test){
+
+      message("    Beginning Variable Omission Protocol...")
+
+      fit_change <- data.frame()
+
+      for (var in predictors){
+
+        data_without_var <- d.test %>%
+          select(-all_of(var))
+
+        tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+        capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
+          train(y ~ .,
+                method = as.character(ml_model),
+                data= data_without_var,
+                trControl = tc,
+                importance=TRUE,
+                localImp=TRUE))})
+
+        RMSE_drop_var <- max(mod.without_var$results$RMSE)
+        original_RMSE <- max(mod.with$results$RMSE)
+        change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
+
+        fit_change <- bind_rows(fit_change, change)
+
+        cat(paste0('           Completed Var: ', var, '\n'))
+
+      }
+
+      return(fit_change)
+
+    }
+
+    thisforest.bin <- function(y, predictors, Z = dat, ntrain = train.set) {
+      set.seed(seed)
+      registerDoParallel(numCores)
+      Z <- Z[names(Z) %in% predictors]
+
+      d <- cbind(y, Z)
+      d <- as.data.frame(d)
+      names(d)[1] <- 'y'
+      d$y <- ifelse(d$y >= 1, 1, 0)
+
+      d.train <- d[seq(ntrain),]
+      d.test <- d[-seq(ntrain),]
+
+      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+      capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
+        train(factor(y) ~ .,
+              method = as.character(ml_model),
+              data=d.train,
+              trControl = tc,
+              importance=TRUE,
+              localImp=TRUE))})
+
+      capture_output_rf.basic <- capture.output({rf.basic <- randomForest(factor(y) ~ .,
+                                                                          data=d.train,
+                                                                          na.action="na.omit",
+                                                                          ntree=1000,
+                                                                          nodesize=4,
+                                                                          importance=TRUE,
+                                                                          localImp=TRUE)})
+
+
+      placebo_base <- placebo_shuffle.bin(mod.with, d.train, d.test)
+
+      placebo <- placebo_base %>%
+        select(-rep_count) %>%
+        rename(var = variable) %>%
+        group_by(var) %>%
+        summarize(min_change = quantile(accuracy_change, 0.025),
+                  max_change = quantile(accuracy_change, 0.975))
+
+
+      fit_change <- dropping_vars.bin(mod.with, predictors, d.test)
+
+      fit_assess <- left_join(placebo, fit_change, by = 'var')
+
+
+
+
+      olist <- list(
+        with = mod.with,
+        rf.basic = rf.basic,
+        X = dat,
+        with.test = d.test,
+        with.train = d.train,
+        var = predictors,
+        training.data.with = d[seq(ntrain), ],
+        kiv = d[-seq(ntrain), predictors, drop = FALSE],
+        test.y = d[-seq(ntrain), ]$y,
+        acc.ch = fit_assess,
+        placebo = placebo_base
+      )
+
+      pusher <- push.bin(olist)
+
+      olist$push = pusher
+
+      return(olist)
+    }
+    thisforest.cont <- function(y, predictors, Z = dat, ntrain = train.set) {
+      set.seed(seed)
+
+      registerDoParallel(numCores)
+
+      Z <- Z[names(Z) %in% predictors]
+
+      d <- cbind(y, Z)
+      d = as.data.frame(d)
+
+      d.train <- d[seq(ntrain),]
+      d.test <- d[-seq(ntrain),]
+
+      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+
+
+      capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
+        train(y ~ .,
+              method = as.character(ml_model),
+              data=d.train,
+              trControl = tc,
+              importance=TRUE,
+              localImp=TRUE))})
+
+      capture_output_rf.basic <- capture.output({rf.basic <- randomForest(y ~ .,
+                                                                          data=d.train,
+                                                                          na.action="na.omit",
+                                                                          ntree=1000,
+                                                                          nodesize=4,
+                                                                          importance=TRUE,
+                                                                          localImp=TRUE)})
+
+
+      placebo_base <- placebo_shuffle.cont(mod.with, d.train, d.test)
+
+      placebo <- placebo_base %>%
+        select(-rep_count) %>%
+        rename(var = variable) %>%
+        group_by(var) %>%
+        summarize(min_change = quantile(accuracy_change, 0.025),
+                  max_change = quantile(accuracy_change, 0.975))
+
+
+      fit_change <- dropping_vars.cont(mod.with, predictors, d.test)
+
+      fit_assess <- left_join(placebo, fit_change, by = 'var')
+
+
+      olist <- list(
+        with = mod.with,
+        rf.basic = rf.basic,
+        X = dat,
+        with.test = d.test,
+        with.train = d.train,
+        var = predictors,
+        training.data.with = d[seq(ntrain), ],
+        kiv = d[-seq(ntrain), predictors, drop = FALSE],
+        test.y = d[-seq(ntrain), ]$y,
+        acc.ch = fit_assess,
+        placebo = placebo_base
+      )
+
+      pusher <- push.cont(olist)
+      olist$push = pusher
+
+      return(olist)
+    }
+
+  } #Routine Functions
+
   if (data_type == 'Binomial'){
-    {
-      {
-        numvars = length(predictors)
-        train.set <- round(length(dat[[outcome]])/5, 0)
-        test.set <- length(dat[[outcome]]) - train.set
-        obs <- length(dat[[outcome]])
-
-        predictor_columns <- names(data[names(data) %in% predictors]) #Subset Predictor Columns
-        formula_str <- paste("y ~", paste(predictor_columns, collapse = " + ")) #Create a String for a Linear Model
-        lm_model <- lm(as.formula(formula_str), data = data) #Run the Linear Model
-        betas <- lm_model$coefficients #Retrieve Betas
-        betas <- betas[names(betas) %in% predictors]
-        x0 <- lm_model$coefficients[["(Intercept)"]]
-
-        noise <- rnorm(obs) #Create Noise
-        exes <- data[names(data) %in% predictors]
-
-
-        ystar0 <- (betas %*% t(exes))[1,] + noise
-        ydisc <- 1*(ystar0>0)
-
-      } #Get Set Parameters - Retrieve Betas, Y*, etc.
-      {
-        #x0 <- rnorm(obs)
-        ystar <- ystar0 + 2*x0
-        ydisc0 <- 1*(ystar>0)
-        ystar.lin <- ystar
-      } #Linear Variables
-      {
-        X <- dat
-        X.train <- X[seq(train.set),]
-        X.test <- X[-seq(train.set),]
-      } #Combine to DF
-      {
-
-        ml_model <- ml[1]
-        placebo_iterations <- as.numeric(ml[3])
-
-        runpred.bin <- function(mod, var, stepper, dat){
-          dat[[var]] <- dat[[var]] + stepper
-          pred <- predict(mod, dat)
-          true <- as.factor(dat$y)  # Ensure true is a factor
-          dif <- as.numeric(pred) - as.numeric(true)  # Convert factor to numeric for calculation
-          return(dif)
-        }
-
-        acc.imp <- function(w, wo, w.dat, wo.dat, y){
-          pred.w <- predict(w, w.dat)
-          pred.wo <- predict(wo, wo.dat)
-          w.acc <- sum(1 * (pred.w == y)) / length(y)
-          wo.acc <- sum(1 * (pred.wo == y)) / length(y)
-          imp.list <- list(w.acc = w.acc, wo.acc = wo.acc, dif = w.acc - wo.acc)
-          return(imp.list)
-        }
-
-        push.bin <- function(l){
-          t <- list()
-
-          for (v in 1:length(l$var)){
-            x = l$var[v]
-            Z = l$with.test
-            sdx <- sd(Z[,x])
-            steps <- seq(-2*sdx, 2*sdx, (4*sdx)/100)
-            tester <- lapply(steps, function(z) runpred.bin(l$with, x, z, Z ))
-            temp <- cbind(steps, t(list.cbind(tester)))
-            t[[x]] <- temp
-          }
-
-          return(t)
-        }
-
-        placebo_shuffle <- function(w, d.train, d.test){
-          message("    Beginning Placebo Protocol...")
-
-          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
-
-          replications <- placebo_iterations
-          placebos <- data.frame()
-
-          variables <- setdiff(names(d.test), "y")
-
-          for (rep_count in 1:replications) {
-            for (variable in variables) {
-              capture_output_original_accuracy <- capture.output({ original_accuracy <- train(factor(y) ~ .,
-                                                                                              data = d.test,
-                                                                                              method = as.character(ml[1]),
-                                                                                              trControl = tc) })
-              original_accuracy <- original_accuracy$results$Accuracy
-
-              shuffle_data <- d.test
-              shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
-
-              capture_output_shuffled_accuracy <- capture.output({shuffled_accuracy <- train(factor(y) ~ .,
-                                                                                             data = shuffle_data,
-                                                                                             method = as.character(ml[1]),
-                                                                                             trControl = tc) })
-              shuffled_accuracy <- shuffled_accuracy$results$Accuracy
-
-              accuracy_change <- original_accuracy - shuffled_accuracy
-
-              placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
-              placebos <- bind_rows(placebos, placebo_temp)
-            }
-
-            if (rep_count %% 5){
-              cat(paste0('           Completed Iteration ', rep_count, '\n'))
-            }
-
-          }
-
-          return(placebos)
-
-        }
-
-        dropping_vars <- function(mod.with, predictors, d.test){
-
-          message("    Beginning Variable Omission Protocol...")
-
-          fit_change <- data.frame()
-
-          for (var in predictors){
-
-            data_without_var <- d.test %>%
-              select(-var)
-
-            tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
-
-            capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
-              train(factor(y) ~ .,
-                    method = as.character(ml_model),
-                    data= data_without_var,
-                    trControl = tc,
-                    importance=TRUE,
-                    localImp=TRUE))})
-
-            RMSE_drop_var <- max(mod.without_var$results$Accuracy)
-            original_RMSE <- mod.with$results$Accuracy[1]
-            change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
-
-            fit_change <- bind_rows(fit_change, change)
-
-          }
-
-          return(fit_change)
-
-        }
-
-        thisforest.bin <- function(y, predictors, Z = X, ntrain = train.set) {
-          set.seed(seed)
-          registerDoParallel(numCores)
-          Z <- Z[names(Z) %in% predictors]
-
-          d <- cbind(y, Z)
-          d <- as.data.frame(d)
-          names(d)[1] <- 'y'
-          d$y <- ifelse(d$y >= 1, 1, 0)
-
-          d.train <- d[seq(ntrain),]
-          d.test <- d[-seq(ntrain),]
-
-          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
-
-          capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
-            train(factor(y) ~ .,
-                  method = as.character(ml_model),
-                  data=d.train,
-                  trControl = tc,
-                  importance=TRUE,
-                  localImp=TRUE))})
-
-          capture_output_rf.basic <- capture.output({rf.basic <- randomForest(factor(y) ~ .,
-                                                                              data=d.train,
-                                                                              na.action="na.omit",
-                                                                              ntree=1000,
-                                                                              nodesize=4,
-                                                                              importance=TRUE,
-                                                                              localImp=TRUE)})
-
-
-          placebo_base <- placebo_shuffle(mod.with, d.train, d.test)
-
-          placebo <- placebo_base %>%
-            select(-rep_count) %>%
-            rename(var = variable) %>%
-            group_by(var) %>%
-            summarize(min_change = quantile(accuracy_change, 0.025),
-                      max_change = quantile(accuracy_change, 0.975))
-
-
-          fit_change <- dropping_vars(mod.with, predictors, d.test)
-
-          fit_assess <- left_join(placebo, fit_change, by = 'var')
-
-
-
-
-          olist <- list(
-            with = mod.with,
-            rf.basic = rf.basic,
-            X = X,
-            with.test = d.test,
-            with.train = d.train,
-            var = predictors,
-            training.data.with = d[seq(ntrain), ],
-            kiv = d[-seq(ntrain), predictors, drop = FALSE],
-            test.y = d[-seq(ntrain), ]$y,
-            acc.ch = fit_assess,
-            placebo = placebo_base
-          )
-
-          pusher <- push.bin(olist)
-
-          olist$push = pusher
-
-          return(olist)
-        }
-
-
-
-      } #Binary Data Functions
-      {
-        sandbox.models.bin <- list()
-        sandbox.models$bin$linear <- thisforest.bin(y = ystar.lin, predictors = predictors)
-
-      } #Allocate Outputs to List
-    } #Binomial
-
+    sandbox.models$pai <- thisforest.bin(y = ifelse(is.factor(outcome_var), as.factor(outcome_var), outcome_var), predictors = predictors)
   } else {
-    {
-      {
-        numvars = length(predictors)
-        train.set <- round(length(dat[[outcome]])/5, 0)
-        test.set <- length(dat[[outcome]]) - train.set
-        obs <- length(dat[[outcome]])
-
-        predictor_columns <- names(data[names(data) %in% predictors]) #Subset Predictor Columns
-        formula_str <- paste("y ~", paste(predictor_columns, collapse = " + ")) #Create a String for a Linear Model
-        lm_model <- lm(as.formula(formula_str), data = data) #Run the Linear Model
-        betas <- lm_model$coefficients #Retrieve Betas
-        betas <- betas[names(betas) %in% predictors]
-        x0 <- lm_model$coefficients[["(Intercept)"]]
-
-        noise <- rnorm(obs) #Create Noise
-        exes <- data[names(data) %in% predictors]
-
-
-        ystar0 <- (betas %*% t(exes))[1,] + noise
-      } #Get Set Parameters - Retrieve Betas, Y*, etc.
-      {
-        #x0 <- rnorm(obs)
-        ystar.lin <- ystar0 + 2*x0
-      } #Linear Variables
-      {
-        X <- dat
-        X.train <- X[seq(train.set),]
-        X.test <- X[-seq(train.set),]
-      } #Combine to DF
-      {
-        ml_model <- ml[1]
-        placebo_iterations <- as.numeric(ml[3])
-
-        runpred.cont <- function(mod, var, stepper, dat){
-          dat[[var]] <- dat[[var]] + stepper
-          pred <- predict(mod, dat)
-          true <- dat$y
-          dif <- pred - true
-          return(dif)
-        }
-        acc.imp <- function(w, wo, w.dat, wo.dat, y){
-          pred.w <- predict(w, w.dat)
-          pred.wo <- predict(wo, wo.dat)
-          w.acc <- sum(1*(pred.w==y)) / length(y)
-          wo.acc <- sum(1*(pred.wo==y)) / length(y)
-          imp.list <- list(w.acc=w.acc, wo.acc=wo.acc, dif=w.acc-wo.acc)
-          return(imp.list)
-        }
-        push.cont <- function(l){
-          t <- list()
-
-          for (v in 1:length(l$var)){
-            x = l$var[v]
-            Z = l$with.test
-            sdx <- sd(Z[,x])
-            steps <- seq(-2*sdx, 2*sdx, (4*sdx)/100)
-            tester <- lapply(steps, function(z) runpred.cont(l$with, x, z, Z ))
-            temp <- cbind(steps, t(list.cbind(tester)))
-            t[[x]] <- temp
-          }
-
-          return(t)
-        }
-        placebo_shuffle <- function(w, d.train, d.test){
-          message("    Beginning Placebo Protocol...")
-
-          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
-
-          replications <- placebo_iterations
-          placebos <- data.frame()
-
-          variables <- setdiff(names(d.test), "y")
-
-          for (rep_count in 1:replications) {
-            for (variable in variables) {
-              capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(y ~ .,
-                                                                                                               data = d.test,
-                                                                                                               method = as.character(ml[1]),
-                                                                                                               trControl = tc)) })
-              original_accuracy <- original_accuracy$results$RMSE
-
-              shuffle_data <- d.test
-              shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
-
-              capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(y ~ .,
-                                                                                                                data = shuffle_data,
-                                                                                                                method = as.character(ml[1]),
-                                                                                                                trControl = tc) )})
-              shuffled_accuracy <- shuffled_accuracy$results$RMSE
-
-              accuracy_change <- original_accuracy - shuffled_accuracy
-
-              placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
-              placebos <- bind_rows(placebos, placebo_temp)
-            }
-
-            if (rep_count %% 5){
-              cat(paste0('           Completed Iteration ', rep_count, '\n'))
-            }
-
-          }
-
-          return(placebos)
-
-        }
-        dropping_vars <- function(mod.with, predictors, d.test){
-
-          message("    Beginning Variable Omission Protocol...")
-
-          fit_change <- data.frame()
-
-          for (var in predictors){
-
-            data_without_var <- d.test %>%
-              select(-all_of(var))
-
-            tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
-
-            capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
-              train(y ~ .,
-                    method = as.character(ml_model),
-                    data= data_without_var,
-                    trControl = tc,
-                    importance=TRUE,
-                    localImp=TRUE))})
-
-            RMSE_drop_var <- max(mod.without_var$results$RMSE)
-            original_RMSE <- max(mod.with$results$RMSE)
-            change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
-
-            fit_change <- bind_rows(fit_change, change)
-
-          }
-
-          return(fit_change)
-
-        }
-        thisforest.cont <- function(y, predictors, Z = X, ntrain = train.set) {
-          set.seed(seed)
-
-          registerDoParallel(numCores)
-
-          Z <- Z[names(Z) %in% predictors]
-
-          d <- cbind(y, Z)
-          d = as.data.frame(d)
-
-          d.train <- d[seq(ntrain),]
-          d.test <- d[-seq(ntrain),]
-
-          tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
-
-
-          capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
-            train(y ~ .,
-                  method = as.character(ml_model),
-                  data=d.train,
-                  trControl = tc,
-                  importance=TRUE,
-                  localImp=TRUE))})
-
-          capture_output_rf.basic <- capture.output({rf.basic <- randomForest(y ~ .,
-                                                                              data=d.train,
-                                                                              na.action="na.omit",
-                                                                              ntree=1000,
-                                                                              nodesize=4,
-                                                                              importance=TRUE,
-                                                                              localImp=TRUE)})
-
-
-          placebo_base <- placebo_shuffle(mod.with, d.train, d.test)
-
-          placebo <- placebo_base %>%
-            select(-rep_count) %>%
-            rename(var = variable) %>%
-            group_by(var) %>%
-            summarize(min_change = quantile(accuracy_change, 0.025),
-                      max_change = quantile(accuracy_change, 0.975))
-
-
-          fit_change <- dropping_vars(mod.with, predictors, d.test)
-
-          fit_assess <- left_join(placebo, fit_change, by = 'var')
-
-
-          olist <- list(
-            with = mod.with,
-            rf.basic = rf.basic,
-            X = X,
-            with.test = d.test,
-            with.train = d.train,
-            var = predictors,
-            training.data.with = d[seq(ntrain), ],
-            kiv = d[-seq(ntrain), predictors, drop = FALSE],
-            test.y = d[-seq(ntrain), ]$y,
-            acc.ch = fit_assess,
-            placebo = placebo_base
-          )
-
-          pusher <- push.cont(olist)
-          olist$push = pusher
-
-          return(olist)
-        }
-
-
-      } #Continuous Data Functions
-      {
-        sandbox.models$cont <- list()
-        sandbox.models$cont$linear <- thisforest.cont(y = ystar.lin, predictors = predictors)
-
-      } #Allocate Outputs to List
-    } #Continuous
-
-  } #PAI Sandbox Models
+    sandbox.models$pai <- thisforest.cont(y = outcome_var, predictors = predictors)
+  } #Implementing by Data Type
 
 
   message("-------------------------------------------------------------------")
@@ -816,28 +506,12 @@ pai_main <- function(data, #Dataframe
 
 
 
-
-
-################################################################################
-#Function Parameters
-#     data = Data Frame
-#     outcome = DV: Character For Column in DF
-#     predictors = IVs: Character (or Comma-Separated Vector) for Column(s) in DF
-#         - Can Also Return 'all' or *empty*/*NULL* -- If 'all' or 'NULL', Will Use Every Column Other than DV
-#     model = Character or Vectors of Model Type (e.g., "Linear" or "LM"; "Exp", etc.)
-#     ml = Machine Learning Model (e.g., 'Random Forest' or 'rf')
-#     seed = (Optional) random seed generator (Character or Numeric -- Converts to numeric in Function)
-
-
-################################################################################
-
-
 ################################################################################
 #Test w/ Sample Data
 ################################################################################
 
 set.seed(1234)
-test_data <- data.frame(y = rnorm(1000, mean = 1, sd = 1),
+test_data <- data.frame(y = sample(0:1000, 1000, replace = TRUE),
                    var1 = rnorm(1000, mean = 15, sd = 1),
                    var2 = rnorm(1000, mean = 10, sd = 1),
                    var3 = rnorm(1000, mean = 5, sd = 2),
@@ -859,68 +533,21 @@ test <- pai_main(data = test_data,
 
 
 pai_plot_BASE_flexible <- function(data,
-                                   data_type = NULL, #Continuous or Binomial
-                                   model_type = NULL, #Linear
                                    plot_type = NULL, #Placebo or Steps
                                    variables = NULL, #Variables to Declare (Null Default = All)
                                    plot_points = FALSE) {
+
+  data <- data$pai
+
+  if(is.null(variables)){
+    variables = data$var
+  }
 
   if(is.null(plot_type)){
     plot_type <- 'Placebo'
   } # Assign 'Placebo' if plot_type = NULL
 
   if(plot_type == 'Placebo'){
-
-    if (is.null(data_type)) {
-      # Default to Binomial
-      data_type <- ifelse(data[1] == 'cont', 'Continuous', 'Binomial')
-      data <- data[[1]]
-    } else if (data_type == "Binomial") {
-      # Assign Binomial
-      data_type == "Binomial"
-      data <- data$bin
-    } else if (data_type == "Continuous") {
-      # Assign Continuous
-      data_type == 'Continuous'
-      data <- data$cont
-    } else if (data_type == "Both") {
-      stop('Need to implement a function for "Both"')
-      # You might want to implement a function for "Both" here
-    }
-    {
-      if (is.null(model_type)){
-        data <- data$linear # Default to Linear
-        model_type <- "Linear"
-      } else if (grepl('Linear', model_type, ignore.case = TRUE)){
-        data <- data$linear # Assign Linear
-        model_type <- "Linear"
-      } else if (grepl('Interact', model_type, ignore.case = TRUE)){
-        data <- data$interact # Assign Interaction
-        model_type <- 'Interaction'
-      } else if (grepl('Square', model_type, ignore.case = TRUE)){
-        data <- data$square # Assign Square
-        model_type <- 'Square'
-      } else if (grepl('polysmall', model_type, ignore.case = TRUE)){
-        data <- data$polySmall # Assign Polynomial
-        model_type <- 'PolySmall'
-      } else if (grepl('poly', model_type, ignore.case = TRUE)){
-        data <- data$poly # Assign Poly(Small)
-        model_type <- 'Poly'
-      } else if (grepl('exp', model_type, ignore.case = TRUE)){
-        data <- data$exp # Assign Exponential
-        model_type <- 'Exponential'
-      } else if (grepl('abs', model_type, ignore.case = TRUE)){
-        data <- data$abs # Assign Abs
-        model_type <- 'Abs'
-      } else if (grepl('sin', model_type, ignore.case = TRUE)){
-        data <- data$sin # Assign Sin
-        model_type <- 'Sin'
-      } else if (grepl('mono', model_type, ignore.case = TRUE)){
-        data <- data$mono # Assign Monotonic
-        model_type <- 'Monotonic'
-      }
-
-    } #Subset by Model Type
 
     {
       temp <- data$acc.ch %>%
@@ -963,67 +590,12 @@ pai_plot_BASE_flexible <- function(data,
   }
 
   else if(plot_type == 'Steps'){
-    {
-      if (is.null(data_type)) {
-        # Default to Binomial
-        data_type <- ifelse(data[1] == 'cont', 'Continuous', 'Binomial')
-        data <- data[[1]]
-      } else if (data_type == "Binomial") {
-        # Assign Binomial
-        data_type == "Binomial"
-        data <- data$bin
-      } else if (data_type == "Continuous") {
-        # Assign Continuous
-        data_type == 'Continuous'
-        data <- data$cont
-      } else if (data_type == "Both") {
-        stop('Need to implement a function for "Both"')
-        # You might want to implement a function for "Both" here
-      }
-    } #Subset by Data Type
-    {
-      if (is.null(model_type)){
-        data <- data$linear # Default to Linear
-        model_type <- "Linear"
-      } else if (grepl('Linear', model_type, ignore.case = TRUE)){
-        data <- data$linear # Assign Linear
-        model_type <- "Linear"
-      } else if (grepl('Interact', model_type, ignore.case = TRUE)){
-        data <- data$interact # Assign Interaction
-        model_type <- 'Interaction'
-      } else if (grepl('Square', model_type, ignore.case = TRUE)){
-        data <- data$square # Assign Square
-        model_type <- 'Square'
-      } else if (grepl('polysmall', model_type, ignore.case = TRUE)){
-        data <- data$polySmall # Assign Polynomial
-        model_type <- 'PolySmall'
-      } else if (grepl('poly', model_type, ignore.case = TRUE)){
-        data <- data$poly # Assign Poly(Small)
-        model_type <- 'Poly'
-      } else if (grepl('exp', model_type, ignore.case = TRUE)){
-        data <- data$exp # Assign Exponential
-        model_type <- 'Exponential'
-      } else if (grepl('abs', model_type, ignore.case = TRUE)){
-        data <- data$abs # Assign Abs
-        model_type <- 'Abs'
-      } else if (grepl('sin', model_type, ignore.case = TRUE)){
-        data <- data$sin # Assign Sin
-        model_type <- 'Sin'
-      } else if (grepl('mono', model_type, ignore.case = TRUE)){
-        data <- data$mono # Assign Monotonic
-        model_type <- 'Monotonic'
-      }
-
-    } #Subset by Model Type
 
     figures <- list()
 
     for (var in variables){
       temp <- data.frame(data$push[var])
       names(temp) <- gsub(paste0(var, "\\."), '', names(temp))
-
-      importance_with <- round(data$variable_importance_with[var], 2)
-      importance_without <- round(data$variable_importance_without[var], 2)
 
       temp_data <- tidyr::gather(temp, key = "variable", value = "value", -steps)
 
@@ -1032,9 +604,7 @@ pai_plot_BASE_flexible <- function(data,
         theme_minimal() +
         geom_hline(yintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
         geom_vline(xintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
-        labs(title = var,
-             subtitle = paste0(model_type, ' Model'),
-             caption = paste0('\nVariable Importance: ', as.numeric(importance_with), ' (With) & ', as.numeric(importance_without), ' (Without)')) +
+        labs(title = var) +
         theme(
           axis.text = element_text(size = 14),
           axis.title.x = element_blank(),
@@ -1076,10 +646,9 @@ pai_plot_BASE_flexible <- function(data,
 }
 
 
+
 pai_plot_BASE_flexible(test,
-                       data_type = 'Continuous',
-                       model_type = "Linear",
-                       plot_type = 'Placebo',
+                       plot_type = 'Steps',
                        plot_points = FALSE)
 
 
