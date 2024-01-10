@@ -19,7 +19,6 @@ pai_main <- function(data, #Dataframe
                      outcome = NULL, #Character or Character Vector (Required)
                      predictors = NULL, #Character or Character Vector (Optional - Default to 'all' Except DV)
                      interactions = NULL, #Character Vector (Optional - Default to Null -- Indicate as Single Character with term(s) separated by '*' -- Ex: 'var1*var2')
-                     model = NULL, #Model Type ("Linear") or Vector of Models (Default to Linear)
                      ml = c(NA, NA, NA), #Vector List of ML Model (Character) + Cores (Numeric) (Optional - Default to RF & 2) + # of Placebo Iterations
                      seed = NULL){ #Numeric Seed (Optional - Default to 1234)
 
@@ -60,13 +59,6 @@ pai_main <- function(data, #Dataframe
       message("    Interactions = ", paste(print_interactions, collapse = '\n                   '))
 
     }
-
-
-    if(is.null(model)){
-      model = "linear"
-    } else if (model %in% c("linear", "lm")){
-      model = "linear"
-    } #Declare Model Type
 
 
     if(is.na(ml[1])){
@@ -129,6 +121,15 @@ pai_main <- function(data, #Dataframe
   placebo_iterations <- as.numeric(ml[3])
   train.set <- round(length(dat[[outcome]])/5, 0)
   outcome_var <- dat[outcome]
+
+
+  if (data_type == 'Continuous'){
+    full_vars <- ifelse(is.null(interactions), paste0("y ~ ", paste(predictors, collapse = " + ")) , paste0("y ~ ", paste(predictors, collapse = " + "), " + ", paste(interactions, collapse = " + ")))
+  } else {
+    full_vars <- ifelse(is.null(interactions), paste0("as.factor(y) ~ ", paste(predictors, collapse = " + ")) , paste0("as.factor(y) ~ ", paste(predictors, collapse = " + "), " + ", paste(interactions, collapse = " + ")))
+  }
+
+
 
   {
 
@@ -207,19 +208,19 @@ pai_main <- function(data, #Dataframe
 
       for (rep_count in 1:replications) {
         for (variable in variables) {
-          capture_output_original_accuracy <- capture.output({ original_accuracy <- train(factor(y) ~ .,
-                                                                                          data = d.test,
-                                                                                          method = as.character(ml[1]),
-                                                                                          trControl = tc) })
+          capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(as.formula(full_vars),
+                                                                                                           data = d.test,
+                                                                                                           method = as.character(ml[1]),
+                                                                                                           trControl = tc)) })
           original_accuracy <- original_accuracy$results$Accuracy
 
           shuffle_data <- d.test
           shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
 
-          capture_output_shuffled_accuracy <- capture.output({shuffled_accuracy <- train(factor(y) ~ .,
-                                                                                         data = shuffle_data,
-                                                                                         method = as.character(ml[1]),
-                                                                                         trControl = tc) })
+          capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(as.formula(full_vars),
+                                                                                                            data = shuffle_data,
+                                                                                                            method = as.character(ml[1]),
+                                                                                                            trControl = tc) )})
           shuffled_accuracy <- shuffled_accuracy$results$Accuracy
 
           accuracy_change <- original_accuracy - shuffled_accuracy
@@ -249,7 +250,7 @@ pai_main <- function(data, #Dataframe
 
       for (rep_count in 1:replications) {
         for (variable in variables) {
-          capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(y ~ .,
+          capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(as.formula(full_vars),
                                                                                                            data = d.test,
                                                                                                            method = as.character(ml[1]),
                                                                                                            trControl = tc)) })
@@ -258,7 +259,7 @@ pai_main <- function(data, #Dataframe
           shuffle_data <- d.test
           shuffle_data[[variable]] <- sample(shuffle_data[[variable]])
 
-          capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(y ~ .,
+          capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(as.formula(full_vars),
                                                                                                             data = shuffle_data,
                                                                                                             method = as.character(ml[1]),
                                                                                                             trControl = tc) )})
@@ -286,28 +287,88 @@ pai_main <- function(data, #Dataframe
 
       fit_change <- data.frame()
 
-      for (var in predictors){
+      if (is.null(interactions)){
+        all_combinations <- c(predictors)
+        generate_combinations_df <- function(predictorss) {
+          combinations <- list()
 
-        data_without_var <- d.test %>%
-          select(-all_of(var))
+          # Generate combinations excluding one predictor at a time
+          for (i in seq_along(predictors)) {
+            current_predictors <- predictors[-i]
+            current_combination <- c(current_predictors, interactions)
+            combinations[[paste("Combination", i)]] <- data.frame(combination = paste(current_combination, collapse = ", "), dropped = predictors[i])
+          }
+
+          # Combine the dataframes into one
+          result_df <- do.call(rbind, combinations)
+
+          return(result_df)
+        }
+        combinations <- generate_combinations_df(predictors)
+
+      } else {
+        all_combinations <- c(predictors, interactions)
+        generate_combinations_df <- function(predictors, interactions) {
+          combinations <- list()
+
+          # Generate combinations excluding one predictor at a time
+          for (i in seq_along(predictors)) {
+            current_predictors <- predictors[-i]
+            current_combination <- c(current_predictors, interactions)
+            combinations[[paste("Combination", i)]] <- data.frame(combination = paste(current_combination, collapse = ", "), dropped = predictors[i])
+          }
+
+          # Generate combinations excluding the interaction
+          for (j in seq_along(interactions)) {
+            current_interactions <- interactions[-j]
+            current_combination <- c(predictors, current_interactions)
+            combinations[[paste("Combination", j + length(predictors))]] <- data.frame(combination = paste(current_combination, collapse = ", "), dropped = interactions[j])
+          }
+
+          # Combine the dataframes into one
+          result_df <- do.call(rbind, combinations)
+
+          return(result_df)
+        }
+        combinations <- generate_combinations_df(predictors, interactions)
+
+      }
+
+      drop_combinations <- data.frame()
+
+      for (i in 1:nrow(combinations)){
+        temp_combination <- gsub("\\, ", " + ", combinations$combination[i])
+        temp_combination <- paste0('as.factor(y) ~ ', temp_combination)
+        dropped_var = combinations$dropped[i]
+        drop_combinations <- bind_rows(drop_combinations, data.frame(combination = temp_combination, dropped_var = dropped_var))
+      }
+
+
+      for (c in 1:nrow(drop_combinations)){
+
+        combination = drop_combinations$combination[c]
+        dropped_var = drop_combinations$dropped_var[c]
 
         tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
         capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
-          train(factor(y) ~ .,
+          train(as.formula(combination),
                 method = as.character(ml_model),
-                data= data_without_var,
+                data= d.test,
                 trControl = tc,
                 importance=TRUE,
                 localImp=TRUE))})
 
         RMSE_drop_var <- max(mod.without_var$results$Accuracy)
-        original_RMSE <- mod.with$results$Accuracy[1]
-        change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
+        original_RMSE <- max(mod.with$results$Accuracy)
+
+
+
+        change <- data.frame(var = dropped_var, fit_change = original_RMSE - RMSE_drop_var)
 
         fit_change <- bind_rows(fit_change, change)
 
-        cat(paste0('           Completed Var: ', var, '\n'))
+        cat(paste0('           Completed Var: ', dropped_var, '\n'))
 
       }
 
@@ -320,28 +381,88 @@ pai_main <- function(data, #Dataframe
 
       fit_change <- data.frame()
 
-      for (var in predictors){
+      if (is.null(interactions)){
+        all_combinations <- c(predictors)
+        generate_combinations_df <- function(predictorss) {
+          combinations <- list()
 
-        data_without_var <- d.test %>%
-          select(-all_of(var))
+          # Generate combinations excluding one predictor at a time
+          for (i in seq_along(predictors)) {
+            current_predictors <- predictors[-i]
+            current_combination <- c(current_predictors, interactions)
+            combinations[[paste("Combination", i)]] <- data.frame(combination = paste(current_combination, collapse = ", "), dropped = predictors[i])
+          }
+
+          # Combine the dataframes into one
+          result_df <- do.call(rbind, combinations)
+
+          return(result_df)
+        }
+        combinations <- generate_combinations_df(predictors)
+
+      } else {
+        all_combinations <- c(predictors, interactions)
+        generate_combinations_df <- function(predictors, interactions) {
+          combinations <- list()
+
+          # Generate combinations excluding one predictor at a time
+          for (i in seq_along(predictors)) {
+            current_predictors <- predictors[-i]
+            current_combination <- c(current_predictors, interactions)
+            combinations[[paste("Combination", i)]] <- data.frame(combination = paste(current_combination, collapse = ", "), dropped = predictors[i])
+          }
+
+          # Generate combinations excluding the interaction
+          for (j in seq_along(interactions)) {
+            current_interactions <- interactions[-j]
+            current_combination <- c(predictors, current_interactions)
+            combinations[[paste("Combination", j + length(predictors))]] <- data.frame(combination = paste(current_combination, collapse = ", "), dropped = interactions[j])
+          }
+
+          # Combine the dataframes into one
+          result_df <- do.call(rbind, combinations)
+
+          return(result_df)
+        }
+        combinations <- generate_combinations_df(predictors, interactions)
+
+      }
+
+      drop_combinations <- data.frame()
+
+      for (i in 1:nrow(combinations)){
+        temp_combination <- gsub("\\, ", " + ", combinations$combination[i])
+        temp_combination <- paste0('y ~ ', temp_combination)
+        dropped_var = combinations$dropped[i]
+        drop_combinations <- bind_rows(drop_combinations, data.frame(combination = temp_combination, dropped_var = dropped_var))
+      }
+
+
+      for (c in 1:nrow(drop_combinations)){
+
+        combination = drop_combinations$combination[c]
+        dropped_var = drop_combinations$dropped_var[c]
 
         tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
         capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings(
-          train(y ~ .,
+          train(as.formula(combination),
                 method = as.character(ml_model),
-                data= data_without_var,
+                data= d.test,
                 trControl = tc,
                 importance=TRUE,
                 localImp=TRUE))})
 
         RMSE_drop_var <- max(mod.without_var$results$RMSE)
         original_RMSE <- max(mod.with$results$RMSE)
-        change <- data.frame(var = var, fit_change = original_RMSE - RMSE_drop_var)
+
+
+
+        change <- data.frame(var = dropped_var, fit_change = original_RMSE - RMSE_drop_var)
 
         fit_change <- bind_rows(fit_change, change)
 
-        cat(paste0('           Completed Var: ', var, '\n'))
+        cat(paste0('           Completed Var: ', dropped_var, '\n'))
 
       }
 
@@ -364,15 +485,18 @@ pai_main <- function(data, #Dataframe
 
       tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
-      capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
-        train(factor(y) ~ .,
-              method = as.character(ml_model),
-              data=d.train,
-              trControl = tc,
-              importance=TRUE,
-              localImp=TRUE))})
+      capture_output_mod.with <- capture.output({
+        mod.with <- suppressWarnings(
+          train(as.formula(full_vars),
+                method = as.character(ml_model),
+                data = d.train,
+                trControl = tc,
+                importance = TRUE,
+                localImp = TRUE)
+        )
+      })
 
-      capture_output_rf.basic <- capture.output({rf.basic <- randomForest(factor(y) ~ .,
+      capture_output_rf.basic <- capture.output({rf.basic <- randomForest(as.formula(full_vars),
                                                                           data=d.train,
                                                                           na.action="na.omit",
                                                                           ntree=1000,
@@ -393,9 +517,7 @@ pai_main <- function(data, #Dataframe
 
       fit_change <- dropping_vars.bin(mod.with, predictors, d.test)
 
-      fit_assess <- left_join(placebo, fit_change, by = 'var')
-
-
+      fit_assess <- left_join(fit_change, placebo, by = 'var')
 
 
       olist <- list(
@@ -413,7 +535,6 @@ pai_main <- function(data, #Dataframe
       )
 
       pusher <- push.bin(olist)
-
       olist$push = pusher
 
       return(olist)
@@ -433,16 +554,18 @@ pai_main <- function(data, #Dataframe
 
       tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
 
+      capture_output_mod.with <- capture.output({
+        mod.with <- suppressWarnings(
+          train(as.formula(full_vars),
+                method = as.character(ml_model),
+                data = d.train,
+                trControl = tc,
+                importance = TRUE,
+                localImp = TRUE)
+        )
+      })
 
-      capture_output_mod.with <- capture.output({ mod.with <- suppressWarnings(
-        train(y ~ .,
-              method = as.character(ml_model),
-              data=d.train,
-              trControl = tc,
-              importance=TRUE,
-              localImp=TRUE))})
-
-      capture_output_rf.basic <- capture.output({rf.basic <- randomForest(y ~ .,
+      capture_output_rf.basic <- capture.output({rf.basic <- randomForest(as.formula(full_vars),
                                                                           data=d.train,
                                                                           na.action="na.omit",
                                                                           ntree=1000,
@@ -463,7 +586,7 @@ pai_main <- function(data, #Dataframe
 
       fit_change <- dropping_vars.cont(mod.with, predictors, d.test)
 
-      fit_assess <- left_join(placebo, fit_change, by = 'var')
+      fit_assess <- left_join(fit_change, placebo, by = 'var')
 
 
       olist <- list(
@@ -489,7 +612,7 @@ pai_main <- function(data, #Dataframe
   } #Routine Functions
 
   if (data_type == 'Binomial'){
-    sandbox.models$pai <- thisforest.bin(y = ifelse(is.factor(outcome_var), as.factor(outcome_var), outcome_var), predictors = predictors)
+    sandbox.models$pai <- thisforest.bin(y = outcome_var, predictors = predictors)
   } else {
     sandbox.models$pai <- thisforest.cont(y = outcome_var, predictors = predictors)
   } #Implementing by Data Type
@@ -506,12 +629,14 @@ pai_main <- function(data, #Dataframe
 
 
 
+
+
 ################################################################################
 #Test w/ Sample Data
 ################################################################################
 
 set.seed(1234)
-test_data <- data.frame(y = sample(0:1000, 1000, replace = TRUE),
+test_data <- data.frame(y = rbinom(20, 1, 0.5),
                    var1 = rnorm(1000, mean = 15, sd = 1),
                    var2 = rnorm(1000, mean = 10, sd = 1),
                    var3 = rnorm(1000, mean = 5, sd = 2),
@@ -521,12 +646,17 @@ test_data <- data.frame(y = sample(0:1000, 1000, replace = TRUE),
 test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
-                 model = NULL,
-                 ml = c("rf", 8, 3),
+                 interactions = c("var1*var2"),
+                 ml = c("rf", 8, 1),
                  seed = 1234)
 
 
-
+data = test_data
+outcome = "y"
+predictors = c("var1", "var2", "var3")
+interactions = c("var1*var2")
+ml = c("rf", 8, 1)
+seed = 1234
 ################################################################################
 #Plot Sample Output
 ################################################################################
@@ -551,7 +681,9 @@ pai_plot_BASE_flexible <- function(data,
 
     {
       temp <- data$acc.ch %>%
-        mutate(var_numeric = as.numeric(factor(var)))
+        mutate(var_numeric = 1:nrow(data$acc.ch)) %>%
+        mutate(var = ifelse(grepl("\\*", var), gsub("\\*", " x\n", var), var))
+
 
       temp_figure <- ggplot(data = temp, aes(x = var_numeric, y = fit_change)) +
         geom_rect(aes(xmin = var_numeric - 0.15, xmax = var_numeric + 0.15,
@@ -620,8 +752,7 @@ pai_plot_BASE_flexible <- function(data,
           strip.background = element_rect(fill = "gray", color = "gray5"),
           plot.title = element_text(size = 18, face = "bold"),
           plot.subtitle = element_text(size = 15),
-          plot.caption = element_text(size = 12, hjust = 0, face = 'italic'),
-          plot.background = element_rect(size = 1, colour = 'gray5', fill = NA))
+          plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
 
 
@@ -640,16 +771,99 @@ pai_plot_BASE_flexible <- function(data,
   }
 
 
-
-
-
 }
 
 
 
 pai_plot_BASE_flexible(test,
-                       plot_type = 'Steps',
+                       plot_type = 'Placebo',
                        plot_points = FALSE)
 
+
+################################################################################
+#Diagnostic Tool
+################################################################################
+
+pai_diagnostic <- function(pai_object = NULL,
+                           variables = NULL,
+                           bins = 10){
+
+  data = pai_object$pai$push
+
+  figure_list <- list()
+
+  if (is.null(variables)){
+    variables = names(pai_object$pai$push)
+  }
+
+
+  for (var in variables){
+
+    temp_dat <- data.frame(data[[var]])
+    temp_dat <- tidyr::pivot_longer(temp_dat, cols = -steps, names_to = "variable", values_to = "value")
+    temp_dat$steps <- as.numeric(temp_dat$steps)
+    num_bins = bins
+    temp_dat$bin <- cut_interval(temp_dat$steps, n = num_bins)
+
+    temp_dat <- temp_dat %>%
+      rowwise() %>%
+      mutate(cut = ifelse(is.numeric(as.numeric(gsub(".*\\,", "", gsub("\\]", "", bin)))),
+                          gsub(".*\\,", "", gsub("\\]", "", bin)),
+                          0)) %>%
+      mutate(cut = as.numeric(cut))
+
+    get_slope <- function(data) {
+      lm_fit <- lm(value ~ steps, data = data)
+      return(coef(lm_fit)[2])
+    }
+    slope_values <- data.frame(
+      bin = unique(temp_dat$bin),
+      slope = sapply(unique(temp_dat$bin), function(bin) get_slope(temp_dat[temp_dat$bin == bin, ]))
+    )
+    slope_values <- slope_values %>%
+      mutate(slope = round(slope, 3)) %>%
+      rename(`Steps Bin` = bin,
+             Slope = slope)
+
+    temp_figure <- ggplot(temp_dat, aes(x = steps, y = value)) +
+      geom_point(colour = 'gray5', alpha = 1/8) +
+      stat_smooth(method = "lm", se = FALSE, aes(color = bin), size = 1.25) +
+      theme_minimal() +
+      labs(
+        title = var,
+        x = '\nSteps',
+        y = ' '
+      ) +
+      geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
+      theme(
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+        panel.grid = element_blank(),
+        legend.title.align = 0.5,
+        legend.text.align = 0.25,
+        legend.title = element_blank(),
+        legend.text = element_text(size = 15, color = "gray5"),
+        legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
+        legend.position = "none",
+        strip.text = element_text(size = 14, face = "bold"),
+        strip.background = element_rect(fill = "gray", color = "gray5"),
+        plot.title = element_text(size = 18, face = "bold"),
+        plot.subtitle = element_text(size = 15),
+        plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
+
+
+    figure_list$Figures[[var]] <- temp_figure
+    figure_list$Slopes[[var]] <- slope_values
+
+  }
+
+  return(figure_list)
+
+}
+
+c <- pai_diagnostic(pai_object = test,
+                    bins = 15,
+                    variables = NULL)
 
 
