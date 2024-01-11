@@ -19,6 +19,7 @@ pai_main <- function(data, #Dataframe
                      outcome = NULL, #Character or Character Vector (Required)
                      predictors = NULL, #Character or Character Vector (Optional - Default to 'all' Except DV)
                      interactions = NULL, #Character Vector (Optional - Default to Null -- Indicate as Single Character with term(s) separated by '*' -- Ex: 'var1*var2')
+                     drop_vars = NULL, #Character Vector (Optional - Default to 'All')
                      ml = c(NA, NA, NA), #Vector List of ML Model (Character) + Cores (Numeric) (Optional - Default to RF & 2) + # of Placebo Iterations
                      seed = NULL){ #Numeric Seed (Optional - Default to 1234)
 
@@ -57,6 +58,14 @@ pai_main <- function(data, #Dataframe
 
 
       message("    Interactions = ", paste(print_interactions, collapse = '\n                   '))
+
+    }
+
+
+    if (is.null(drop_vars)){
+      message("    Variables to Iteratively Drop = All Predictors")
+    } else {
+      message("    Variables to Iteratively Drop = ", paste(drop_vars, collapse = ", "))
 
     }
 
@@ -136,9 +145,10 @@ pai_main <- function(data, #Dataframe
     runpred.bin <- function(mod, var, stepper, dat){
       dat[[var]] <- dat[[var]] + stepper
       pred <- predict(mod, dat)
-      true <- as.factor(dat$y)  # Ensure true is a factor
-      dif <- as.numeric(pred) - as.numeric(true)  # Convert factor to numeric for calculation
-      return(dif)
+      true <- dat$y
+      onecount <- length(which(pred=='1'))/length(true)
+      acc <- length(which(pred==true))/length(true)
+      return(c(onecount, acc))
     }
     runpred.cont <- function(mod, var, stepper, dat){
       dat[[var]] <- dat[[var]] + stepper
@@ -343,6 +353,12 @@ pai_main <- function(data, #Dataframe
         drop_combinations <- bind_rows(drop_combinations, data.frame(combination = temp_combination, dropped_var = dropped_var))
       }
 
+      if(is.null(drop_vars)){
+        drop_combinations <- drop_combinations
+      } else {
+        drop_combinations <- drop_combinations[drop_combinations$dropped_var %in% drop_vars,]
+      } #Add Exception If drop_vars declared
+
 
       for (c in 1:nrow(drop_combinations)){
 
@@ -437,6 +453,12 @@ pai_main <- function(data, #Dataframe
         drop_combinations <- bind_rows(drop_combinations, data.frame(combination = temp_combination, dropped_var = dropped_var))
       }
 
+
+      if(is.null(drop_vars)){
+        drop_combinations <- drop_combinations
+      } else {
+        drop_combinations <- drop_combinations[drop_combinations$dropped_var %in% drop_vars,]
+      } # Add Exception if drop_vars declared
 
       for (c in 1:nrow(drop_combinations)){
 
@@ -636,7 +658,7 @@ pai_main <- function(data, #Dataframe
 ################################################################################
 
 set.seed(1234)
-test_data <- data.frame(y = rbinom(20, 1, 0.5),
+test_data <- data.frame(y = rnorm(1000, mean = 75, sd = 125),
                    var1 = rnorm(1000, mean = 15, sd = 1),
                    var2 = rnorm(1000, mean = 10, sd = 1),
                    var3 = rnorm(1000, mean = 5, sd = 2),
@@ -647,16 +669,12 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  interactions = c("var1*var2"),
+                 drop_vars = c('var1', 'var2'),
                  ml = c("rf", 8, 1),
                  seed = 1234)
 
 
-data = test_data
-outcome = "y"
-predictors = c("var1", "var2", "var3")
-interactions = c("var1*var2")
-ml = c("rf", 8, 1)
-seed = 1234
+
 ################################################################################
 #Plot Sample Output
 ################################################################################
@@ -800,7 +818,9 @@ pai_diagnostic <- function(pai_object = NULL,
   for (var in variables){
 
     temp_dat <- data.frame(data[[var]])
-    temp_dat <- tidyr::pivot_longer(temp_dat, cols = -steps, names_to = "variable", values_to = "value")
+    temp_dat <- temp_dat[,c(1,3)]
+    names(temp_dat) <- c('steps', 'accuracy')
+
     temp_dat$steps <- as.numeric(temp_dat$steps)
     num_bins = bins
     temp_dat$bin <- cut_interval(temp_dat$steps, n = num_bins)
@@ -813,26 +833,42 @@ pai_diagnostic <- function(pai_object = NULL,
       mutate(cut = as.numeric(cut))
 
     get_slope <- function(data) {
-      lm_fit <- lm(value ~ steps, data = data)
-      return(coef(lm_fit)[2])
+      lm_fit <- lm(accuracy ~ steps, data = data)
+      suppressWarnings(summary_lm <- summary(lm_fit))
+
+      slope <- coef(lm_fit)[2]
+      se_slope <- summary_lm$coefficients[2, "Std. Error"]
+      p_value <- summary_lm$coefficients[2, "Pr(>|t|)"]
+
+      return(c(slope = slope, se_slope = se_slope, p_value = p_value))
     }
+
     slope_values <- data.frame(
       bin = unique(temp_dat$bin),
-      slope = sapply(unique(temp_dat$bin), function(bin) get_slope(temp_dat[temp_dat$bin == bin, ]))
+      t(sapply(unique(temp_dat$bin), function(bin) get_slope(temp_dat[temp_dat$bin == bin, ])))
     )
-    slope_values <- slope_values %>%
-      mutate(slope = round(slope, 3)) %>%
-      rename(`Steps Bin` = bin,
-             Slope = slope)
 
-    temp_figure <- ggplot(temp_dat, aes(x = steps, y = value)) +
-      geom_point(colour = 'gray5', alpha = 1/8) +
-      stat_smooth(method = "lm", se = FALSE, aes(color = bin), size = 1.25) +
+    slope_frame <- data.frame(
+      bin = slope_values$bin,
+      slope = round(slope_values$slope.steps, 3),
+      se = round(slope_values$se_slope, 3),
+      p_value = round(slope_values$p_value, 3),
+      sig = case_when(
+        .default = '',
+        slope_values$p_value < 0.001 ~ '***',
+        slope_values$p_value > 0.001 & slope_values$p_value <= 0.01 ~ '**',
+        slope_values$p_value > 0.01 & slope_values$p_value <= 0.05 ~ '*'
+      )
+    )
+
+    temp_figure <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
+      geom_point(colour = 'gray5', alpha = 1/5) +
+      stat_smooth(method = "lm", se = FALSE, aes(group = bin), colour = 'gray5') +
       theme_minimal() +
       labs(
         title = var,
         x = '\nSteps',
-        y = ' '
+        y = 'Accuracy\n'
       ) +
       geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
       theme(
@@ -854,7 +890,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
 
     figure_list$Figures[[var]] <- temp_figure
-    figure_list$Slopes[[var]] <- slope_values
+    figure_list$Slopes[[var]] <- slope_frame
 
   }
 
@@ -863,7 +899,7 @@ pai_diagnostic <- function(pai_object = NULL,
 }
 
 c <- pai_diagnostic(pai_object = test,
-                    bins = 15,
+                    bins = 10,
                     variables = NULL)
-
-
+c$Figures$var1
+c$Slopes$var3
