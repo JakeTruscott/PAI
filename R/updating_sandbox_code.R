@@ -901,5 +901,5 @@ pai_diagnostic <- function(pai_object = NULL,
 c <- pai_diagnostic(pai_object = test,
                     bins = 10,
                     variables = NULL)
-c$Figures$var1
+c$Figures$var3
 c$Slopes$var3
