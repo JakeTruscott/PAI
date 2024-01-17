@@ -802,9 +802,12 @@ pai_plot_BASE_flexible(test,
 #Diagnostic Tool
 ################################################################################
 
+
 pai_diagnostic <- function(pai_object = NULL,
                            variables = NULL,
-                           bins = 10){
+                           type = NULL,
+                           bins = 10,
+                           bin_cut = NULL){
 
   data = pai_object$pai$push
 
@@ -814,92 +817,368 @@ pai_diagnostic <- function(pai_object = NULL,
     variables = names(pai_object$pai$push)
   }
 
-
-  for (var in variables){
-
-    temp_dat <- data.frame(data[[var]])
-    temp_dat <- temp_dat[,c(1,3)]
-    names(temp_dat) <- c('steps', 'accuracy')
-
-    temp_dat$steps <- as.numeric(temp_dat$steps)
-    num_bins = bins
-    temp_dat$bin <- cut_interval(temp_dat$steps, n = num_bins)
-
-    temp_dat <- temp_dat %>%
-      rowwise() %>%
-      mutate(cut = ifelse(is.numeric(as.numeric(gsub(".*\\,", "", gsub("\\]", "", bin)))),
-                          gsub(".*\\,", "", gsub("\\]", "", bin)),
-                          0)) %>%
-      mutate(cut = as.numeric(cut))
-
-    get_slope <- function(data) {
-      lm_fit <- lm(accuracy ~ steps, data = data)
-      suppressWarnings(summary_lm <- summary(lm_fit))
-
-      slope <- coef(lm_fit)[2]
-      se_slope <- summary_lm$coefficients[2, "Std. Error"]
-      p_value <- summary_lm$coefficients[2, "Pr(>|t|)"]
-
-      return(c(slope = slope, se_slope = se_slope, p_value = p_value))
-    }
-
-    slope_values <- data.frame(
-      bin = unique(temp_dat$bin),
-      t(sapply(unique(temp_dat$bin), function(bin) get_slope(temp_dat[temp_dat$bin == bin, ])))
-    )
-
-    slope_frame <- data.frame(
-      bin = slope_values$bin,
-      slope = round(slope_values$slope.steps, 3),
-      se = round(slope_values$se_slope, 3),
-      p_value = round(slope_values$p_value, 3),
-      sig = case_when(
-        .default = '',
-        slope_values$p_value < 0.001 ~ '***',
-        slope_values$p_value > 0.001 & slope_values$p_value <= 0.01 ~ '**',
-        slope_values$p_value > 0.01 & slope_values$p_value <= 0.05 ~ '*'
-      )
-    )
-
-    temp_figure <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
-      geom_point(colour = 'gray5', alpha = 1/5) +
-      stat_smooth(method = "lm", se = FALSE, aes(group = bin), colour = 'gray5') +
-      theme_minimal() +
-      labs(
-        title = var,
-        x = '\nSteps',
-        y = 'Accuracy\n'
-      ) +
-      geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
-      theme(
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
-        panel.grid = element_blank(),
-        legend.title.align = 0.5,
-        legend.text.align = 0.25,
-        legend.title = element_blank(),
-        legend.text = element_text(size = 15, color = "gray5"),
-        legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
-        legend.position = "none",
-        strip.text = element_text(size = 14, face = "bold"),
-        strip.background = element_rect(fill = "gray", color = "gray5"),
-        plot.title = element_text(size = 18, face = "bold"),
-        plot.subtitle = element_text(size = 15),
-        plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
-
-
-    figure_list$Figures[[var]] <- temp_figure
-    figure_list$Slopes[[var]] <- slope_frame
-
+  if (is.null(type)){
+    type = 'static'
   }
+
+  suppressWarnings(
+    if (type == 'static'){
+      for (var in variables){
+
+        temp_dat <- data.frame(data[[var]])
+        temp_dat <- temp_dat[,c(1,3)]
+        names(temp_dat) <- c('steps', 'accuracy')
+
+        temp_dat$steps <- as.numeric(temp_dat$steps)
+        num_bins = bins
+        temp_dat$bin <- cut_interval(temp_dat$steps, n = num_bins)
+
+        temp_dat <- temp_dat %>%
+          rowwise() %>%
+          mutate(cut = ifelse(is.numeric(as.numeric(gsub(".*\\,", "", gsub("\\]", "", bin)))),
+                              gsub(".*\\,", "", gsub("\\]", "", bin)),
+                              0)) %>%
+          mutate(cut = as.numeric(cut))
+
+        get_slope <- function(data) {
+          lm_fit <- lm(accuracy ~ steps, data = data)
+          suppressWarnings(summary_lm <- summary(lm_fit))
+
+          slope <- coef(lm_fit)[2]
+          se_slope <- summary_lm$coefficients[2, "Std. Error"]
+          p_value <- summary_lm$coefficients[2, "Pr(>|t|)"]
+
+          return(c(slope = slope, se_slope = se_slope, p_value = p_value))
+        }
+
+        slope_values <- data.frame(
+          bin = unique(temp_dat$bin),
+          t(sapply(unique(temp_dat$bin), function(bin) get_slope(temp_dat[temp_dat$bin == bin, ])))
+        )
+
+        slope_frame <- data.frame(
+          bin = slope_values$bin,
+          slope = round(slope_values$slope.steps, 3),
+          se = round(slope_values$se_slope, 3),
+          p_value = round(slope_values$p_value, 3),
+          sig = case_when(
+            .default = '',
+            slope_values$p_value < 0.001 ~ '***',
+            slope_values$p_value > 0.001 & slope_values$p_value <= 0.01 ~ '**',
+            slope_values$p_value > 0.01 & slope_values$p_value <= 0.05 ~ '*'
+          )
+        )
+
+        temp_figure <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
+          geom_point(colour = 'gray5', alpha = 1/5) +
+          stat_smooth(method = "lm", se = FALSE, aes(group = bin), colour = 'gray5') +
+          theme_minimal() +
+          labs(
+            title = var,
+            x = '\nSteps',
+            y = 'Accuracy\n'
+          ) +
+          geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
+          theme(
+            axis.text = element_text(size = 14),
+            axis.title = element_text(size = 16),
+            panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+            panel.grid = element_blank(),
+            legend.title.align = 0.5,
+            legend.text.align = 0.25,
+            legend.title = element_blank(),
+            legend.text = element_text(size = 15, color = "gray5"),
+            legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
+            legend.position = "none",
+            strip.text = element_text(size = 14, face = "bold"),
+            strip.background = element_rect(fill = "gray", color = "gray5"),
+            plot.title = element_text(size = 18, face = "bold"),
+            plot.subtitle = element_text(size = 15),
+            plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
+
+
+        figure_list$Figures[[var]] <- temp_figure
+        figure_list$Slopes[[var]] <- slope_frame
+
+      } #Static Bins
+    }
+    else if (type == 'rolling_extended'){
+
+      for (var in variables){
+
+        temp_dat <- data.frame(data[[var]])
+        temp_dat <- temp_dat[,c(1,3)]
+        names(temp_dat) <- c('steps', 'accuracy')
+
+        temp_dat$steps <- as.numeric(temp_dat$steps)
+        num_bins = bins
+        temp_dat$bin <- cut_interval(temp_dat$steps, n = num_bins)
+
+        temp_dat <- temp_dat %>%
+          rowwise() %>%
+          mutate(cut = ifelse(is.numeric(as.numeric(gsub(".*\\,", "", gsub("\\]", "", bin)))),
+                              gsub(".*\\,", "", gsub("\\]", "", bin)),
+                              0)) %>%
+          mutate(cut = as.numeric(cut)) %>%
+          group_by(cut) %>%
+          mutate(bin_id = cur_group_id())
+
+
+        get_slope_pair <- function(bin_id, data) {
+
+          if (bin_id == max(data$bin_id)) {
+            bin_1 <- max(data$bin_id)
+            bin_data <- data %>%
+              filter(bin_id == bin_1)
+          } else {
+            bin_1 <- bin_id
+            bin_2 <- bin_id + 1
+            bin_data <- data %>%
+              filter(bin_id %in% c(bin_1, bin_2))
+          }
+
+          lm_fit <- lm(accuracy ~ steps, data = bin_data)
+          suppressWarnings(summary_lm <- summary(lm_fit))
+
+          slope <- coef(lm_fit)[2]
+          conf_intervals <- confint(lm_fit)[2, ]
+          se_slope <- summary_lm$coefficients[2, "Std. Error"]
+          p_value <- summary_lm$coefficients[2, "Pr(>|t|)"]
+          steps <- bin_data$steps
+          accuracy <- bin_data$accuracy
+
+          if (bin_id == max(data$bin_id)) {
+            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = c(bin_1))
+          } else {
+            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = paste0(bin_1, ", ", bin_2))
+          }
+
+          return(temp_combined)
+        }
+
+
+        # Get slope values for each bin and bin + 1 pair
+        slope_values <- data.frame(
+          do.call(rbind, lapply(unique(temp_dat$bin_id), function(bin) get_slope_pair(bin, temp_dat)))
+        )
+
+        slope_frame <- data.frame(
+          bins = slope_values$bins,
+          slope = round(slope_values$slope, 3),
+          se = round(slope_values$se_slope, 3),
+          conf_low = round(slope_values$conf_low, 3),
+          conf_high = round(slope_values$conf_high, 3),
+          p_value = round(slope_values$p_value, 3),
+          sig = case_when(
+            .default = '',
+            slope_values$p_value < 0.001 ~ '***',
+            slope_values$p_value > 0.001 & slope_values$p_value <= 0.01 ~ '**',
+            slope_values$p_value > 0.01 & slope_values$p_value <= 0.05 ~ '*'
+          )
+        )
+
+        result_dat <- data.frame()
+
+        for (i in 1:bins){
+          max_bin = (i + bin_cut) - 1
+          bin_range = c()
+          for (b in 1:max_bin){
+            bin_range[b] <- b
+          }
+
+
+          t = temp_dat %>%
+            filter(bin_id %in% c(bin_range)) %>%
+            mutate(bin_group = paste(bin_range, collapse = ", "))
+
+          result_dat <- bind_rows(result_dat, t)
+
+
+        }
+
+
+        temp_figure <- ggplot(result_dat, aes(x = steps, y = accuracy)) +
+          geom_point(colour = 'gray5', alpha = 1/5) +
+          stat_smooth(method = "lm", se = T, aes(group = bin_group), colour = 'gray5') +
+          geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          theme_minimal() +
+          labs(
+            title = var,
+            x = '\nSteps',
+            y = 'Accuracy\n'
+          ) +
+          geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
+          theme(
+            axis.text = element_text(size = 14),
+            axis.title = element_text(size = 16),
+            panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+            panel.grid = element_blank(),
+            legend.title.align = 0.5,
+            legend.text.align = 0.25,
+            legend.title = element_blank(),
+            legend.text = element_text(size = 15, color = "gray5"),
+            legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
+            legend.position = "none",
+            strip.text = element_text(size = 14, face = "bold"),
+            strip.background = element_rect(fill = "gray", color = "gray5"),
+            plot.title = element_text(size = 18, face = "bold"),
+            plot.subtitle = element_text(size = 15),
+            plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
+
+
+        figure_list$Figures[[var]] <- temp_figure
+        figure_list$Slopes[[var]] <- slope_frame
+
+      }
+
+
+    } #Rolling Extended Bins
+    else {
+      for (var in variables){
+
+        temp_dat <- data.frame(data[[var]])
+        temp_dat <- temp_dat[,c(1,3)]
+        names(temp_dat) <- c('steps', 'accuracy')
+
+        temp_dat$steps <- as.numeric(temp_dat$steps)
+        num_bins = bins
+        temp_dat$bin <- cut_interval(temp_dat$steps, n = num_bins)
+
+        temp_dat <- temp_dat %>%
+          rowwise() %>%
+          mutate(cut = ifelse(is.numeric(as.numeric(gsub(".*\\,", "", gsub("\\]", "", bin)))),
+                              gsub(".*\\,", "", gsub("\\]", "", bin)),
+                              0)) %>%
+          mutate(cut = as.numeric(cut)) %>%
+          group_by(cut) %>%
+          mutate(bin_id = cur_group_id())
+
+
+        get_slope_pair <- function(bin_id, data) {
+
+          if (bin_id == max(data$bin_id)) {
+            bin_1 <- max(data$bin_id)
+            bin_data <- data %>%
+              filter(bin_id == bin_1)
+          } else {
+            bin_1 <- bin_id
+            bin_2 <- bin_id + 1
+            bin_data <- data %>%
+              filter(bin_id %in% c(bin_1, bin_2))
+          }
+
+          lm_fit <- lm(accuracy ~ steps, data = bin_data)
+          suppressWarnings(summary_lm <- summary(lm_fit))
+
+          slope <- coef(lm_fit)[2]
+          conf_intervals <- confint(lm_fit)[2, ]
+          se_slope <- summary_lm$coefficients[2, "Std. Error"]
+          p_value <- summary_lm$coefficients[2, "Pr(>|t|)"]
+          steps <- bin_data$steps
+          accuracy <- bin_data$accuracy
+
+          if (bin_id == max(data$bin_id)) {
+            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = c(bin_1))
+          } else {
+            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = paste0(bin_1, ", ", bin_2))
+          }
+
+          return(temp_combined)
+        }
+
+
+        # Get slope values for each bin and bin + 1 pair
+        slope_values <- data.frame(
+          do.call(rbind, lapply(unique(temp_dat$bin_id), function(bin) get_slope_pair(bin, temp_dat)))
+        )
+
+        slope_frame <- data.frame(
+          bins = slope_values$bins,
+          slope = round(slope_values$slope, 3),
+          se = round(slope_values$se_slope, 3),
+          conf_low = round(slope_values$conf_low, 3),
+          conf_high = round(slope_values$conf_high, 3),
+          p_value = round(slope_values$p_value, 3),
+          sig = case_when(
+            .default = '',
+            slope_values$p_value < 0.001 ~ '***',
+            slope_values$p_value > 0.001 & slope_values$p_value <= 0.01 ~ '**',
+            slope_values$p_value > 0.01 & slope_values$p_value <= 0.05 ~ '*'
+          )
+        )
+
+        result_dat <- data.frame()
+
+        for (i in 1:bins){
+          bin_1 = i
+          bin_2 = ifelse(bin_1 == bins, bin_1, bin_1 + 1)
+
+          t = temp_dat %>%
+            filter(bin_id %in% c(bin_1, bin_2)) %>%
+            mutate(bin_group = paste0(bin_1, "+", bin_2))
+
+          result_dat <- bind_rows(result_dat, t)
+
+
+        }
+
+
+        temp_figure <- ggplot(result_dat, aes(x = steps, y = accuracy)) +
+          geom_point(colour = 'gray5', alpha = 1/5) +
+          stat_smooth(method = "lm", se = T, aes(group = bin_group), colour = 'gray5') +
+          geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          theme_minimal() +
+          labs(
+            title = var,
+            x = '\nSteps',
+            y = 'Accuracy\n'
+          ) +
+          geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
+          theme(
+            axis.text = element_text(size = 14),
+            axis.title = element_text(size = 16),
+            panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+            panel.grid = element_blank(),
+            legend.title.align = 0.5,
+            legend.text.align = 0.25,
+            legend.title = element_blank(),
+            legend.text = element_text(size = 15, color = "gray5"),
+            legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
+            legend.position = "none",
+            strip.text = element_text(size = 14, face = "bold"),
+            strip.background = element_rect(fill = "gray", color = "gray5"),
+            plot.title = element_text(size = 18, face = "bold"),
+            plot.subtitle = element_text(size = 15),
+            plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
+
+        temp_figure
+
+        figure_list$Figures[[var]] <- temp_figure
+        figure_list$Slopes[[var]] <- slope_frame
+
+      }
+
+    } #Rolling Bins
+  )
+
+
 
   return(figure_list)
 
 }
 
+#Types:
+# static = by bin
+# rolling = by bin + 1
+# rolling_extended = by_bin:max_bin
+
+
 c <- pai_diagnostic(pai_object = test,
                     bins = 10,
-                    variables = NULL)
-c$Figures$var3
+                    variables = NULL,
+                    type = 'static',
+                    bin_cut = 5)
+c$Figures$var2
 c$Slopes$var3
+
