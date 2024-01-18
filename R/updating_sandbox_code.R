@@ -927,20 +927,21 @@ pai_diagnostic <- function(pai_object = NULL,
 
         get_slope_pair <- function(bin_id, data) {
 
-          if (bin_id == max(data$bin_id)) {
-            bin_1 <- max(data$bin_id)
-            bin_data <- data %>%
-              filter(bin_id == bin_1)
-          } else {
-            bin_1 <- bin_id
-            bin_2 <- bin_id + 1
-            bin_data <- data %>%
-              filter(bin_id %in% c(bin_1, bin_2))
+          max_bin = (bin_id + bin_cut) - 1
+          if(max_bin > bins){
+            max_bin = bins
           }
+
+          bin_allocation <- c(bin_id:max_bin)
+
+
+          bin_data <- temp_dat %>%
+            filter(bin_id >= min(bin_allocation) & bin_id <= max(bin_allocation))
 
           lm_fit <- lm(accuracy ~ steps, data = bin_data)
           suppressWarnings(summary_lm <- summary(lm_fit))
 
+          bin_group = paste0('(', round(min(bin_data$steps), 3), ", ", round(max(bin_data$steps), 3), "]")
           slope <- coef(lm_fit)[2]
           conf_intervals <- confint(lm_fit)[2, ]
           se_slope <- summary_lm$coefficients[2, "Std. Error"]
@@ -948,20 +949,18 @@ pai_diagnostic <- function(pai_object = NULL,
           steps <- bin_data$steps
           accuracy <- bin_data$accuracy
 
-          if (bin_id == max(data$bin_id)) {
-            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = c(bin_1))
-          } else {
-            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = paste0(bin_1, ", ", bin_2))
-          }
+          temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = bin_group)
 
           return(temp_combined)
         }
 
+        bin_values <- unique(temp_dat$bin_id)
+        slope_values <- data.frame()
+        for (i in bin_values){
+          temp_slope_values <- get_slope_pair(i, temp_dat)
+          slope_values <- bind_rows(slope_values, temp_slope_values)
+        }
 
-        # Get slope values for each bin and bin + 1 pair
-        slope_values <- data.frame(
-          do.call(rbind, lapply(unique(temp_dat$bin_id), function(bin) get_slope_pair(bin, temp_dat)))
-        )
 
         slope_frame <- data.frame(
           bins = slope_values$bins,
@@ -976,31 +975,48 @@ pai_diagnostic <- function(pai_object = NULL,
             slope_values$p_value > 0.001 & slope_values$p_value <= 0.01 ~ '**',
             slope_values$p_value > 0.01 & slope_values$p_value <= 0.05 ~ '*'
           )
-        )
+        ) %>%
+          unique()
 
         result_dat <- data.frame()
 
-        for (i in 1:bins){
-          max_bin = (i + bin_cut) - 1
-          bin_range = c()
-          for (b in 1:max_bin){
-            bin_range[b] <- b
+
+        for (b in 1:bins){
+          max_bin = (b + bin_cut) - 1
+          if(max_bin > bins){
+            max_bin = bins
           }
+
+          bin_range <- c(b:max_bin)
+
 
 
           t = temp_dat %>%
             filter(bin_id %in% c(bin_range)) %>%
-            mutate(bin_group = paste(bin_range, collapse = ", "))
+            mutate(id = b)
 
           result_dat <- bind_rows(result_dat, t)
 
-
         }
+
+
+        result_dat <- result_dat %>%
+          group_by(id) %>%
+          mutate(bin_group = paste0("(", round(min(steps), 3), ", ", round(max(steps), 3), "]")) %>%
+          ungroup()
+
+        result_dat$slope <- slope_frame$slope[match(result_dat$bin_group, slope_frame$bins)]
+        result_dat$sig <- slope_frame$sig[match(result_dat$bin_group, slope_frame$bins)]
+
+        result_dat$bin_group <- paste0(result_dat$bin_group, " Bin (", result_dat$id, ") \n Slope = ", result_dat$slope, " ", result_dat$sig)
+
+        result_dat$bin_group <- factor(result_dat$bin_group, levels = unique(result_dat$bin_group))
 
 
         temp_figure <- ggplot(result_dat, aes(x = steps, y = accuracy)) +
           geom_point(colour = 'gray5', alpha = 1/5) +
           stat_smooth(method = "lm", se = T, aes(group = bin_group), colour = 'gray5') +
+          facet_wrap(~bin_group) +
           geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
           theme_minimal() +
           labs(
@@ -1020,12 +1036,15 @@ pai_diagnostic <- function(pai_object = NULL,
             legend.text = element_text(size = 15, color = "gray5"),
             legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
             legend.position = "none",
-            strip.text = element_text(size = 14, face = "bold"),
+            strip.text = element_text(size = 12, face = "bold"),
             strip.background = element_rect(fill = "gray", color = "gray5"),
             plot.title = element_text(size = 18, face = "bold"),
             plot.subtitle = element_text(size = 15),
             plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
+
+
+        temp_figure
 
         figure_list$Figures[[var]] <- temp_figure
         figure_list$Slopes[[var]] <- slope_frame
@@ -1071,6 +1090,7 @@ pai_diagnostic <- function(pai_object = NULL,
           lm_fit <- lm(accuracy ~ steps, data = bin_data)
           suppressWarnings(summary_lm <- summary(lm_fit))
 
+          bin_group = paste0('(', round(min(bin_data$steps), 3), ", ", round(max(bin_data$steps), 3), "]")
           slope <- coef(lm_fit)[2]
           conf_intervals <- confint(lm_fit)[2, ]
           se_slope <- summary_lm$coefficients[2, "Std. Error"]
@@ -1078,14 +1098,12 @@ pai_diagnostic <- function(pai_object = NULL,
           steps <- bin_data$steps
           accuracy <- bin_data$accuracy
 
-          if (bin_id == max(data$bin_id)) {
-            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = c(bin_1))
-          } else {
-            temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = paste0(bin_1, ", ", bin_2))
-          }
+          temp_combined <- data.frame(slope = slope, se_slope = se_slope, p_value = p_value, conf_low = conf_intervals[1], conf_high = conf_intervals[2], bins = bin_group)
+
 
           return(temp_combined)
         }
+
 
 
         # Get slope values for each bin and bin + 1 pair
@@ -1110,24 +1128,38 @@ pai_diagnostic <- function(pai_object = NULL,
 
         result_dat <- data.frame()
 
-        for (i in 1:bins){
-          bin_1 = i
+        for (b in 1:bins){
+          bin_1 = b
           bin_2 = ifelse(bin_1 == bins, bin_1, bin_1 + 1)
 
           t = temp_dat %>%
             filter(bin_id %in% c(bin_1, bin_2)) %>%
-            mutate(bin_group = paste0(bin_1, "+", bin_2))
+            mutate(bin_group = paste0(bin_1, "+", bin_2)) %>%
+            mutate(id = b)
 
           result_dat <- bind_rows(result_dat, t)
 
 
         }
 
+        result_dat <- result_dat %>%
+          group_by(id) %>%
+          mutate(bin_group = paste0("(", round(min(steps), 3), ", ", round(max(steps), 3), "]")) %>%
+          ungroup()
+
+        result_dat$slope <- slope_frame$slope[match(result_dat$bin_group, slope_frame$bins)]
+        result_dat$sig <- slope_frame$sig[match(result_dat$bin_group, slope_frame$bins)]
+
+        result_dat$bin_group <- paste0(result_dat$bin_group, " Bin (", result_dat$id, ") \n Slope = ", result_dat$slope, " ", result_dat$sig)
+
+        result_dat$bin_group <- factor(result_dat$bin_group, levels = unique(result_dat$bin_group))
+
 
         temp_figure <- ggplot(result_dat, aes(x = steps, y = accuracy)) +
           geom_point(colour = 'gray5', alpha = 1/5) +
           stat_smooth(method = "lm", se = T, aes(group = bin_group), colour = 'gray5') +
           geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          facet_wrap(~bin_group) +
           theme_minimal() +
           labs(
             title = var,
@@ -1146,7 +1178,7 @@ pai_diagnostic <- function(pai_object = NULL,
             legend.text = element_text(size = 15, color = "gray5"),
             legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
             legend.position = "none",
-            strip.text = element_text(size = 14, face = "bold"),
+            strip.text = element_text(size = 12, face = "bold"),
             strip.background = element_rect(fill = "gray", color = "gray5"),
             plot.title = element_text(size = 18, face = "bold"),
             plot.subtitle = element_text(size = 15),
@@ -1173,12 +1205,14 @@ pai_diagnostic <- function(pai_object = NULL,
 # rolling = by bin + 1
 # rolling_extended = by_bin:max_bin
 
+#To Do Tomorrow: Fix rolling regular to make sure it prints slopes same as rolling_extended by bin grouping
+
 
 c <- pai_diagnostic(pai_object = test,
-                    bins = 10,
+                    bins = 12,
                     variables = NULL,
-                    type = 'static',
+                    type = 'rolling_extended',
                     bin_cut = 5)
 c$Figures$var2
-c$Slopes$var3
+c$Slopes$var2
 
