@@ -675,128 +675,6 @@ test <- pai_main(data = test_data,
 
 
 
-################################################################################
-#Plot Sample Output
-################################################################################
-
-
-pai_plot_BASE_flexible <- function(data,
-                                   plot_type = NULL, #Placebo or Steps
-                                   variables = NULL, #Variables to Declare (Null Default = All)
-                                   plot_points = FALSE) {
-
-  data <- data$pai
-
-  if(is.null(variables)){
-    variables = data$var
-  }
-
-  if(is.null(plot_type)){
-    plot_type <- 'Placebo'
-  } # Assign 'Placebo' if plot_type = NULL
-
-  if(plot_type == 'Placebo'){
-
-    {
-      temp <- data$acc.ch %>%
-        mutate(var_numeric = 1:nrow(data$acc.ch)) %>%
-        mutate(var = ifelse(grepl("\\*", var), gsub("\\*", " x\n", var), var))
-
-
-      temp_figure <- ggplot(data = temp, aes(x = var_numeric, y = fit_change)) +
-        geom_rect(aes(xmin = var_numeric - 0.15, xmax = var_numeric + 0.15,
-                      ymin = min_change, ymax = max_change, fill = 'Range of Predicted Accuracy from Placebos'),
-                  color = 'black') +
-        geom_point(aes(color = 'Prediction from Model Fit After Dropping Information'), size = 2.5) +
-        geom_hline(yintercept = 0, linetype = 2) +
-        scale_fill_manual(values = 'gray', name = NULL) +
-        scale_color_manual(values = 'gray5', name = NULL) +
-        scale_x_continuous(breaks = seq(min(temp$var_numeric), max(temp$var_numeric), 1), labels = temp$var) +
-        theme_minimal() +
-        theme_test(base_size = 14) +
-        labs(
-          x = '\n',
-          y = 'Change in Predicted Accuracy\nWith All True Data\n') +
-        theme(
-          axis.text = element_text(size = 14),
-          panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
-          legend.title.align = 0.5,
-          legend.text.align = 0.25,
-          legend.title = element_blank(),
-          legend.text = element_text(size = 12, color = "gray5"),
-          legend.position = "bottom",
-          strip.text = element_text(size = 14, face = "bold"),
-          strip.background = element_rect(fill = "gray", color = "gray5"),
-          plot.title = element_text(size = 18, face = "bold"),
-          plot.subtitle = element_text(size = 15),
-          plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
-
-      return(temp_figure)
-
-    } #Return Figure
-
-
-
-  }
-
-  else if(plot_type == 'Steps'){
-
-    figures <- list()
-
-    for (var in variables){
-      temp <- data.frame(data$push[var])
-      names(temp) <- gsub(paste0(var, "\\."), '', names(temp))
-
-      temp_data <- tidyr::gather(temp, key = "variable", value = "value", -steps)
-
-      temp_figure <- ggplot(data = temp_data, aes(x = steps, y = value)) +
-        stat_smooth(method = 'lm', geom = 'smooth', formula = y ~ x, se = FALSE, size = 1, colour = 'deepskyblue3') +
-        theme_minimal() +
-        geom_hline(yintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
-        geom_vline(xintercept = 0, linetype = 2, colour = 'gray5', alpha = 1/3) +
-        labs(title = var) +
-        theme(
-          axis.text = element_text(size = 14),
-          axis.title.x = element_blank(),
-          axis.title.y = element_blank(),
-          panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
-          legend.title.align = 0.5,
-          legend.text.align = 0.25,
-          legend.title = element_blank(),
-          legend.text = element_text(size = 15, color = "gray5"),
-          legend.box.background = element_rect(size = 1, color = 'gray5', fill = NA),
-          legend.position = "bottom",
-          strip.text = element_text(size = 14, face = "bold"),
-          strip.background = element_rect(fill = "gray", color = "gray5"),
-          plot.title = element_text(size = 18, face = "bold"),
-          plot.subtitle = element_text(size = 15),
-          plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
-
-
-
-      if (plot_points == TRUE){
-        temp_figure <- temp_figure + geom_point(alpha = 1/10)
-      }
-
-
-      figures[[var]] <- temp_figure
-
-    }
-    yleft <- textGrob("\nEffect on Outcome\n", rot = 90, gp = gpar(fontsize = 15))
-    bottom <- textGrob("\nSteps\n",  gp = gpar(fontsize = 15))
-    uni <-  grid.arrange(grobs = figures, left = yleft, bottom = bottom)
-    return(uni)
-  }
-
-
-}
-
-
-
-pai_plot_BASE_flexible(test,
-                       plot_type = 'Placebo',
-                       plot_points = FALSE)
-
 
 ################################################################################
 #Diagnostic Tool
@@ -1053,6 +931,47 @@ pai_diagnostic <- function(pai_object = NULL,
 
 
     } #Rolling Extended Bins
+    else if (type == 'placebo'){
+
+      {
+        temp <- pai_object$pai$acc.ch %>%
+          mutate(var_numeric = 1:nrow(pai_object$pai$acc.ch)) %>%
+          mutate(var = ifelse(grepl("\\*", var), gsub("\\*", " x\n", var), var))
+
+
+        temp_figure <- ggplot(data = temp, aes(x = var_numeric, y = fit_change)) +
+          geom_rect(aes(xmin = var_numeric - 0.15, xmax = var_numeric + 0.15,
+                        ymin = min_change, ymax = max_change, fill = 'Range of Predicted Accuracy from Placebos'),
+                    color = 'black') +
+          geom_point(aes(color = 'Prediction from Model Fit After Dropping Information'), size = 2.5) +
+          geom_hline(yintercept = 0, linetype = 2) +
+          scale_fill_manual(values = 'gray', name = NULL) +
+          scale_color_manual(values = 'gray5', name = NULL) +
+          scale_x_continuous(breaks = seq(min(temp$var_numeric), max(temp$var_numeric), 1), labels = temp$var) +
+          theme_minimal() +
+          theme_test(base_size = 14) +
+          labs(
+            x = '\n',
+            y = 'Change in Predicted Accuracy\nWith All True Data\n') +
+          theme(
+            axis.text = element_text(size = 14),
+            panel.border = element_rect(linewidth = 1, color = "gray5", fill = NA),
+            legend.title.align = 0.5,
+            legend.text.align = 0.25,
+            legend.title = element_blank(),
+            legend.text = element_text(size = 12, color = "gray5"),
+            legend.position = "bottom",
+            strip.text = element_text(size = 14, face = "bold"),
+            strip.background = element_rect(fill = "gray", color = "gray5"),
+            plot.title = element_text(size = 18, face = "bold"),
+            plot.subtitle = element_text(size = 15),
+            plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
+
+        figure_list$Figures[['placebo']] <- temp_figure
+
+      } #Placebos
+
+    }
     else {
       for (var in variables){
 
@@ -1184,7 +1103,6 @@ pai_diagnostic <- function(pai_object = NULL,
             plot.subtitle = element_text(size = 15),
             plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
-        temp_figure
 
         figure_list$Figures[[var]] <- temp_figure
         figure_list$Slopes[[var]] <- slope_frame
@@ -1204,15 +1122,15 @@ pai_diagnostic <- function(pai_object = NULL,
 # static = by bin
 # rolling = by bin + 1
 # rolling_extended = by_bin:max_bin
-
-#To Do Tomorrow: Fix rolling regular to make sure it prints slopes same as rolling_extended by bin grouping
+# placebo = placebo iterations
 
 
 c <- pai_diagnostic(pai_object = test,
                     bins = 12,
                     variables = NULL,
-                    type = 'rolling_extended',
-                    bin_cut = 5)
+                    type = 'static')
+
+#c$Figures$placebo
 c$Figures$var2
 c$Slopes$var2
 
