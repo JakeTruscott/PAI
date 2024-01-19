@@ -20,7 +20,7 @@ pai_main <- function(data, #Dataframe
                      predictors = NULL, #Character or Character Vector (Optional - Default to 'all' Except DV)
                      interactions = NULL, #Character Vector (Optional - Default to Null -- Indicate as Single Character with term(s) separated by '*' -- Ex: 'var1*var2')
                      drop_vars = NULL, #Character Vector (Optional - Default to 'All')
-                     ml = c(NA, NA, NA), #Vector List of ML Model (Character) + Cores (Numeric) (Optional - Default to RF & 2) + # of Placebo Iterations
+                     ml = c(NA, NA, NA, NA), #Vector List of ML Model (Character) + Cores (Numeric) (Optional - Default to RF & 2) + # of Placebo Iterations + K Folds for ML
                      seed = NULL){ #Numeric Seed (Optional - Default to 1234)
 
   message("-------------------------------------------------------------------")
@@ -88,6 +88,12 @@ pai_main <- function(data, #Dataframe
       ml[3] <- as.numeric(ml[3])
     } #Declare Placebo Iterations
 
+    if(is.na(ml[4])){
+      ml[4] <- 5
+    } else {
+      ml[4] <- as.numeric(ml[4])
+    }
+
 
     if (any(is.na(ml[c(1, 2, 3)]))) {
       message("    NULL or Default Assigned Within 1 or More Parameters in 'ml'")
@@ -95,12 +101,16 @@ pai_main <- function(data, #Dataframe
       message("          ML Model: ", ml[1])
       message("          Cores: ", ml[2])
       message("          Placebo Shuffling Repetitions: ", ml[3])
+      message("          Cross-Validation Folds: ", ml[4])
+
 
     } else {
       message('    ML Parameters:')
       message("          ML Model: ", ml[1])
       message("          Cores: ", ml[2])
       message("          Placebo Shuffling Repetitions: ", ml[3])
+      message("          Cross-Validation Folds: ", ml[4])
+
     }
 
     unique_dv_values <- data[[outcome]]
@@ -130,6 +140,7 @@ pai_main <- function(data, #Dataframe
   placebo_iterations <- as.numeric(ml[3])
   train.set <- round(length(dat[[outcome]])/5, 0)
   outcome_var <- dat[outcome]
+  cv_folds <- ml[4]
 
 
   if (data_type == 'Continuous'){
@@ -209,12 +220,13 @@ pai_main <- function(data, #Dataframe
     placebo_shuffle.bin <- function(w, d.train, d.test){
       message("    Beginning Placebo Protocol...")
 
-      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+      tc <- trainControl(method = 'repeatedcv', number = cv_folds, repeats = 3, savePredictions = TRUE)
 
       replications <- placebo_iterations
       placebos <- data.frame()
 
       variables <- setdiff(names(d.test), "y")
+      variables <- c(variables, interactions)
 
       for (rep_count in 1:replications) {
         for (variable in variables) {
@@ -251,12 +263,15 @@ pai_main <- function(data, #Dataframe
     placebo_shuffle.cont <- function(w, d.train, d.test){
       message("    Beginning Placebo Protocol...")
 
-      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+      tc <- trainControl(method = 'repeatedcv', number = cv_folds, repeats = 3, savePredictions = TRUE)
 
       replications <- placebo_iterations
       placebos <- data.frame()
 
       variables <- setdiff(names(d.test), "y")
+      variables <- c(variables, interactions)
+
+
 
       for (rep_count in 1:replications) {
         for (variable in variables) {
@@ -505,7 +520,7 @@ pai_main <- function(data, #Dataframe
       d.train <- d[seq(ntrain),]
       d.test <- d[-seq(ntrain),]
 
-      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+      tc <- trainControl(method = 'repeatedcv', number = cv_folds, repeats = 3, savePredictions = TRUE)
 
       capture_output_mod.with <- capture.output({
         mod.with <- suppressWarnings(
@@ -574,7 +589,7 @@ pai_main <- function(data, #Dataframe
       d.train <- d[seq(ntrain),]
       d.test <- d[-seq(ntrain),]
 
-      tc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = TRUE)
+      tc <- trainControl(method = 'repeatedcv', number = cv_folds, repeats = 3, savePredictions = TRUE)
 
       capture_output_mod.with <- capture.output({
         mod.with <- suppressWarnings(
@@ -653,6 +668,7 @@ pai_main <- function(data, #Dataframe
 
 
 
+
 ################################################################################
 #Test w/ Sample Data
 ################################################################################
@@ -669,10 +685,15 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  interactions = c("var1*var2"),
-                 drop_vars = c('var1', 'var2'),
                  ml = c("rf", 8, 1),
                  seed = 1234)
 
+data = test_data
+outcome = "y"
+predictors = c("var1", "var2", "var3")
+interactions = c("var1*var2")
+ml = c("rf", 8, 1)
+seed = 1234
 
 
 
@@ -1128,9 +1149,9 @@ pai_diagnostic <- function(pai_object = NULL,
 c <- pai_diagnostic(pai_object = test,
                     bins = 12,
                     variables = NULL,
-                    type = 'static')
+                    type = 'placebo')
 
-#c$Figures$placebo
+c$Figures$placebo
 c$Figures$var2
 c$Slopes$var2
 
