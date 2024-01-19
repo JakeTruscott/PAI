@@ -685,15 +685,8 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  interactions = c("var1*var2"),
-                 ml = c("rf", 8, 1),
+                 ml = c("rf", 8, 1, 5),
                  seed = 1234)
-
-data = test_data
-outcome = "y"
-predictors = c("var1", "var2", "var3")
-interactions = c("var1*var2")
-ml = c("rf", 8, 1)
-seed = 1234
 
 
 
@@ -718,6 +711,14 @@ pai_diagnostic <- function(pai_object = NULL,
 
   if (is.null(type)){
     type = 'static'
+  }
+
+  if (is.null(bins)){
+    bins = 5
+  }
+
+  if (is.null(bin_cut)){
+    bin_cut = 5
   }
 
   suppressWarnings(
@@ -855,6 +856,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
         bin_values <- unique(temp_dat$bin_id)
         slope_values <- data.frame()
+
         for (i in bin_values){
           temp_slope_values <- get_slope_pair(i, temp_dat)
           slope_values <- bind_rows(slope_values, temp_slope_values)
@@ -1147,11 +1149,11 @@ pai_diagnostic <- function(pai_object = NULL,
 
 
 c <- pai_diagnostic(pai_object = test,
-                    bins = 12,
+                    bins = 10,
                     variables = NULL,
-                    type = 'placebo')
+                    type = 'rolling_extended')
 
-c$Figures$placebo
+#c$Figures$placebo
 c$Figures$var2
 c$Slopes$var2
 
