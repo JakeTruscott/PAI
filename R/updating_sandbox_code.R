@@ -140,7 +140,7 @@ pai_main <- function(data, #Dataframe
   placebo_iterations <- as.numeric(ml[3])
   train.set <- round(length(dat[[outcome]])/5, 0)
   outcome_var <- dat[outcome]
-  cv_folds <- ml[4]
+  cv_folds <- as.numeric(ml[4])
 
 
   if (data_type == 'Continuous'){
@@ -232,6 +232,7 @@ pai_main <- function(data, #Dataframe
         for (variable in variables) {
           capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(as.formula(full_vars),
                                                                                                            data = d.test,
+                                                                                                           metric = "Accuracy",
                                                                                                            method = as.character(ml[1]),
                                                                                                            trControl = tc)) })
           original_accuracy <- original_accuracy$results$Accuracy
@@ -241,11 +242,12 @@ pai_main <- function(data, #Dataframe
 
           capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(as.formula(full_vars),
                                                                                                             data = shuffle_data,
+                                                                                                            metric = 'Accuracy',
                                                                                                             method = as.character(ml[1]),
                                                                                                             trControl = tc) )})
           shuffled_accuracy <- shuffled_accuracy$results$Accuracy
 
-          accuracy_change <- original_accuracy - shuffled_accuracy
+          accuracy_change <- as.numeric(mean(original_accuracy)) - as.numeric(mean(shuffled_accuracy))
 
           placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
           placebos <- bind_rows(placebos, placebo_temp)
@@ -277,6 +279,7 @@ pai_main <- function(data, #Dataframe
         for (variable in variables) {
           capture_output_original_accuracy <- capture.output({ suppressWarnings(original_accuracy <- train(as.formula(full_vars),
                                                                                                            data = d.test,
+                                                                                                           metric = 'RMSE',
                                                                                                            method = as.character(ml[1]),
                                                                                                            trControl = tc)) })
           original_accuracy <- original_accuracy$results$RMSE
@@ -286,11 +289,12 @@ pai_main <- function(data, #Dataframe
 
           capture_output_shuffled_accuracy <- capture.output({ suppressWarnings( shuffled_accuracy <- train(as.formula(full_vars),
                                                                                                             data = shuffle_data,
+                                                                                                            metric = 'RMSE',
                                                                                                             method = as.character(ml[1]),
                                                                                                             trControl = tc) )})
           shuffled_accuracy <- shuffled_accuracy$results$RMSE
 
-          accuracy_change <- original_accuracy - shuffled_accuracy
+          accuracy_change <- as.numeric(mean(original_accuracy)) - as.numeric(mean(shuffled_accuracy))
 
           placebo_temp <- data.frame(rep_count = rep_count, variable = variable, accuracy_change = accuracy_change)
           placebos <- bind_rows(placebos, placebo_temp)
@@ -669,12 +673,14 @@ pai_main <- function(data, #Dataframe
 
 
 
+
+
 ################################################################################
 #Test w/ Sample Data
 ################################################################################
 
 set.seed(1234)
-test_data <- data.frame(y = rnorm(1000, mean = 75, sd = 125),
+test_data <- data.frame(y = sample(0:1, 1000, replace = TRUE),
                    var1 = rnorm(1000, mean = 15, sd = 1),
                    var2 = rnorm(1000, mean = 10, sd = 1),
                    var3 = rnorm(1000, mean = 5, sd = 2),
@@ -685,8 +691,28 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  interactions = c("var1*var2"),
-                 ml = c("rf", 8, 1, 5),
+                 ml = c("rf", 8, 10, 10),
                  seed = 1234)
+
+
+
+################################################################################
+#ML That Works and Doesnt
+################################################################################
+
+# Works
+'
+-rf
+-parRF
+- nnet
+'
+
+# Doesn't
+'
+- ranger
+- extraTrees (draws selection parameters?)
+
+'
 
 
 
@@ -778,7 +804,7 @@ pai_diagnostic <- function(pai_object = NULL,
             x = '\nSteps',
             y = 'Accuracy\n'
           ) +
-          geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          #geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
           geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
           theme(
             axis.text = element_text(size = 14),
@@ -793,7 +819,7 @@ pai_diagnostic <- function(pai_object = NULL,
             legend.position = "none",
             strip.text = element_text(size = 14, face = "bold"),
             strip.background = element_rect(fill = "gray", color = "gray5"),
-            plot.title = element_text(size = 18, face = "bold"),
+            plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
             plot.subtitle = element_text(size = 15),
             plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
@@ -918,7 +944,7 @@ pai_diagnostic <- function(pai_object = NULL,
           geom_point(colour = 'gray5', alpha = 1/5) +
           stat_smooth(method = "lm", se = T, aes(group = bin_group), colour = 'gray5') +
           facet_wrap(~bin_group) +
-          geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          #geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
           theme_minimal() +
           labs(
             title = var,
@@ -939,7 +965,7 @@ pai_diagnostic <- function(pai_object = NULL,
             legend.position = "none",
             strip.text = element_text(size = 12, face = "bold"),
             strip.background = element_rect(fill = "gray", color = "gray5"),
-            plot.title = element_text(size = 18, face = "bold"),
+            plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
             plot.subtitle = element_text(size = 15),
             plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
@@ -986,7 +1012,7 @@ pai_diagnostic <- function(pai_object = NULL,
             legend.position = "bottom",
             strip.text = element_text(size = 14, face = "bold"),
             strip.background = element_rect(fill = "gray", color = "gray5"),
-            plot.title = element_text(size = 18, face = "bold"),
+            plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
             plot.subtitle = element_text(size = 15),
             plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
@@ -1100,7 +1126,7 @@ pai_diagnostic <- function(pai_object = NULL,
         temp_figure <- ggplot(result_dat, aes(x = steps, y = accuracy)) +
           geom_point(colour = 'gray5', alpha = 1/5) +
           stat_smooth(method = "lm", se = T, aes(group = bin_group), colour = 'gray5') +
-          geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
+          #geom_hline(yintercept = 0, linetype =2 , alpha = 1/3) +
           facet_wrap(~bin_group) +
           theme_minimal() +
           labs(
@@ -1122,7 +1148,7 @@ pai_diagnostic <- function(pai_object = NULL,
             legend.position = "none",
             strip.text = element_text(size = 12, face = "bold"),
             strip.background = element_rect(fill = "gray", color = "gray5"),
-            plot.title = element_text(size = 18, face = "bold"),
+            plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
             plot.subtitle = element_text(size = 15),
             plot.caption = element_text(size = 12, hjust = 0, face = 'italic'))
 
@@ -1149,11 +1175,14 @@ pai_diagnostic <- function(pai_object = NULL,
 
 
 c <- pai_diagnostic(pai_object = test,
-                    bins = 10,
+                    bins = 15,
                     variables = NULL,
-                    type = 'rolling_extended')
+                    bin_cut = 10,
+                    type = 'rolling')
 
 #c$Figures$placebo
-c$Figures$var2
-c$Slopes$var2
+c$Figures$var3
+c$Slopes$var3
 
+
+test$pai$push$var1
