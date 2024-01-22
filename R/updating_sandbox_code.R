@@ -691,10 +691,15 @@ test <- pai_main(data = test_data,
                  outcome = "y",
                  predictors = c("var1", "var2", "var3"),
                  interactions = c("var1*var2"),
-                 ml = c("rf", 8, 10, 10),
+                 ml = c("Ada", 8, 10, 10),
                  seed = 1234)
 
-
+data = test_data
+outcome = "y"
+predictors = c("var1", "var2", "var3")
+interactions = c("var1*var2")
+ml = c("ada", 8, 10, 10)
+seed = 1234
 
 ################################################################################
 #ML That Works and Doesnt
