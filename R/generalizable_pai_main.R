@@ -1333,7 +1333,7 @@ pai_diagnostic <- function(pai_object = NULL,
 #Types:
 # static = by bin
 # rolling = by bin + 1
-# rolling_extended = by_bin:max_bin
+# rolling_extended = by_bin + bin_cut:max_bin
 # placebo = placebo iterations
 
 
@@ -1342,6 +1342,4 @@ c <- pai_diagnostic(pai_object = test,
                     variables = NULL,
                     bin_cut = 3)
 
-c$combined_diagnostics$var1
-c$figures$placebo
 
