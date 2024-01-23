@@ -593,12 +593,10 @@ test <- pai_main(data = test_data,
                  predictors = c('var1', 'var2', 'var3'),
                  interactions = 'var1*var2',
                  drop_vars = NULL,
-                 ml = c('parRF', 8, 2, 10),
+                 ml = c('adaboost', 8, 2, 10),
                  custom_tc = "method = 'repeatedcv', number = cv_folds, repeats = 2, savePredictions = TRUE",
                  seed = 1234)
 
-
-plot(factor(test$drop_acc.ch$var), test$drop_acc.ch$fit_change)
 
 
 ################################################################################
@@ -1345,4 +1343,5 @@ c <- pai_diagnostic(pai_object = test,
                     bin_cut = 3)
 
 c$combined_diagnostics$var1
+c$figures$placebo
 
