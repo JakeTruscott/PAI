@@ -593,7 +593,7 @@ test <- pai_main(data = test_data,
                  predictors = c('var1', 'var2', 'var3'),
                  interactions = 'var1*var2',
                  drop_vars = NULL,
-                 ml = c('adaboost', 8, 2, 10),
+                 ml = c('parRF', 8, 5, 10),
                  custom_tc = "method = 'repeatedcv', number = cv_folds, repeats = 2, savePredictions = TRUE",
                  seed = 1234)
 
@@ -1300,7 +1300,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
       diagnostic_list$figures$rolling_extended[[var]] <- temp_figure_stand_alone
       combined_diagnostic_list$figures$rolling_extended[[var]] <- temp_figure_combined
-      diagnostic_list$slope_tables$rolling_extended[[var]] <- slope_frame
+      diagnostic_list$slope_tables$rolling_extended[[var]] <- slope_temp
 
     }
 
@@ -1342,4 +1342,5 @@ c <- pai_diagnostic(pai_object = test,
                     variables = NULL,
                     bin_cut = 3)
 
-
+c$combined_diagnostics$var3
+c$slope_tables$rolling_extended$var3
