@@ -739,7 +739,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
       {
         temp_figure_combined <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
-          geom_point(colour = 'gray5') +
+          geom_point(shape = 1, colour = 'gray5', fill = NA, alpha = 1/2) +
           stat_smooth(aes(colour = 'Linear Fit\n(w/ 95% CI)'), data = temp_dat, method = "lm", se = FALSE, linetype = 'solid', size = 1) +
           geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0, colour = 'gray5') +
           stat_smooth(aes(colour = 'Loess Fit\n(w/ SE)'), method = "loess", se = TRUE, linetype = 'dashed', size = 1) +
@@ -889,7 +889,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
       {
         temp_figure_combined <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
-          geom_point(colour = 'gray5') +
+          geom_point(shape = 1, colour = 'gray5', fill = NA, alpha = 1/2) +
           geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
           stat_smooth(aes(colour = 'Linear Fit\n(w/ 95% CI)', group = bin), data = temp_dat, method = "lm", se = FALSE, linetype = 'solid', size = 1) +
           geom_errorbar(aes(ymin = ci.lwr, ymax = ci.upr), width = 0, colour = 'gray5') +
@@ -1077,7 +1077,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
       {
         temp_figure_combined <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
-          geom_point(colour = 'gray5') +
+          geom_point(shape = 1, colour = 'gray5', fill = NA, alpha = 1/2) +
           geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
           stat_smooth(aes(colour = 'Linear Fit\n(w/ 95% CI)', group = bin_cut_id), data = temp_dat, method = "lm", se = FALSE, linetype = 'solid', size = 1) +
           geom_errorbar(aes(ymin = ci.lwr, ymax = ci.upr), width = 0, colour = 'gray5') +
@@ -1260,7 +1260,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
       {
         temp_figure_combined <- ggplot(temp_dat, aes(x = steps, y = accuracy)) +
-          geom_point(colour = 'gray5') +
+          geom_point(shape = 1, colour = 'gray5', fill = NA, alpha = 1/2) +
           geom_vline(aes(xintercept = cut), linetype = 2, alpha = 1/3) +
           stat_smooth(aes(colour = 'Linear Fit\n(w/ 95% CI)', group = bin_cut_id), data = temp_dat, method = "lm", se = FALSE, linetype = 'solid', size = 1) +
           geom_errorbar(aes(ymin = ci.lwr, ymax = ci.upr), width = 0, colour = 'gray5') +
