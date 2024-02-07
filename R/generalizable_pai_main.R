@@ -2,14 +2,14 @@
 #Prediction as Inference (PAI) Package - R
 #Updating Sandbox Materials
 #Code Developed by Ben Johnson (UF), Logan Strother (Purdue), and Jake Truscott (Purdue)
-#Updated January 2024
+#Updated February 2024
 #Contact: jtruscot@purdue.edu
 ################################################################################
 
 ################################################################################
 #Load Packages
 ################################################################################
-library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork)
+library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork); library(stringr)
 
 
 ################################################################################
@@ -76,10 +76,11 @@ pai_main <- function(data,
 
 
     if (is.null(predictors)){
-      parameters['predictors'] <- names(data[!names(data) %in% outcome])
+      parameters[['predictors']] <- names(data)[!names(data) %in% parameters[['outcome']]]
     } else {
-      parameters['predictors'] <- paste0(predictors, collapse = ", ")
+      parameters[['predictors']] <- paste0(predictors, collapse = ", ")
     } #predictors
+
 
     if (is.null(interactions) || length(interactions) == 0) {
       parameters['interactions'] <- 'None'
