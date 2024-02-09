@@ -1,4 +1,52 @@
+################################################################################
+#Prediction as Inference (PAI) Package - R
+#Updating Sandbox Materials
+#Code Developed by Ben Johnson (UF), Logan Strother (Purdue), and Jake Truscott (Purdue)
+#Updated February 2024
+#Contact: jtruscot@purdue.edu
+################################################################################
 
+################################################################################
+#Load Packages
+################################################################################
+library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork); library(stringr); library(cowplot)
+
+
+################################################################################
+# PAI Main Parameters
+################################################################################
+'
+#data -- Dataframe
+
+#outcome -- Single Character from #data (Required)
+
+#predictors -- Character or Character Vector (Required) ~ Default to ALL Non-"outcome"
+
+#interactions -- Character Vector (Optional - Default to Null -- Indicate as Single Character with term(s) separated by "*" ~  Ex: "var1*var2")
+
+#drop_vars #Character Vector (Optional - Default to ALL)
+
+# ml:
+  [1] ML Model (caret R)
+  [2] Parallel Cores (Default to 1)
+  [3] Placebo Iterations (Default 10)
+  [4] K-Folds (Default 10)
+
+# additional_tC = Additional Train Control Params
+
+# Seed -- Random Seed Generator (Default to 1234)
+'
+
+'
+Notes:
+1) Make sure to reference caret package documentation for trainControl-specific parameters & have libraries downloaded -- Will register "Selection" to download non-installed packages needed for specific ML Models (ex: "fastAdaboost" for boosted trees)
+
+'
+
+
+################################################################################
+# PAI Function
+################################################################################
 
 pai_main <- function(data,
                      outcome = NULL,
@@ -590,7 +638,13 @@ pai_main <- function(data,
 }
 
 
-test <- pai_main(data = with.dat,
+########################
+#Test Run
+#WODouglas - with.dat
+#permutations data
+########################
+
+WOD_test <- pai_main(data = with.dat,
                  outcome = 'direction',
                  predictors = c('term', 'issueArea', 'iA.8', 'iA.7', 'iA.2', 'iA.1'),
                  factors = NULL,
@@ -600,6 +654,10 @@ test <- pai_main(data = with.dat,
                  ml = c('parRF', 8, 100, 10),
                  seed = 1234)
 
+
+################################################################################
+# PAI Diagnostic Tool
+################################################################################
 
 
 pai_diagnostic <- function(pai_object = NULL,
@@ -1364,7 +1422,8 @@ pai_diagnostic <- function(pai_object = NULL,
 }
 
 
-c <- pai_diagnostic(pai_object = test,
+c <- pai_diagnostic(pai_object = WOD_test,
                     bins = NULL,
-                    variables = NULL)
+                    variables = NULL,
+                    bin_cut = NULL)
 
