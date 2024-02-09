@@ -657,6 +657,11 @@ WOD_test <- pai_main(data = with.dat,
 
 ################################################################################
 # PAI Diagnostic Tool
+#Types:
+# static = by bin
+# rolling = by bin + 1
+# rolling_extended = by_bin + bin_cut:max_bin
+# placebo = placebo iterations
 ################################################################################
 
 
