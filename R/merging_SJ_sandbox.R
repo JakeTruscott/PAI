@@ -642,6 +642,10 @@ pai_main <- function(data,
 #Test Run
 #WODouglas - with.dat
 #permutations data
+dropbox <- "E:/Strother_Johnson/data"
+load(file.path(dropbox, 'permutation-dfs.rdata'))
+with.dat <- perms[[1]][[1]]
+
 ########################
 
 WOD_test <- pai_main(data = with.dat,
