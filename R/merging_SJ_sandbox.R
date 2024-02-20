@@ -54,6 +54,7 @@ pai_main <- function(data,
                      factors = NULL,
                      assign_factors = c(FALSE, 4),
                      interactions = NULL,
+                     list_drop_vars = FALSE,
                      drop_vars = NULL,
                      ml = c(NA, NA, 10, 10),
                      custom_tc = FALSE,
@@ -106,11 +107,36 @@ pai_main <- function(data,
     }
     #interactions
 
-    if (is.null(drop_vars)){
-      parameters['drop_vars'] <- 'All Predictors'
+    if(is.null(list_drop_vars)){
+      parameters['list_drop_vars'] <- 'FALSE'
+    } else if(list_drop_vars == FALSE){
+      parameters['list_drop_vars'] <- 'FALSE'
+    } else{
+      parameters['list_drop_vars'] <- TRUE
+    } #Drop Vars List Type
+
+    if(list_drop_vars == FALSE){
+
+      if (is.null(drop_vars)){
+        parameters['drop_vars'] <- 'All Predictors'
+      } else {
+        parameters['drop_vars'] <- paste(drop_vars, collapse = ", ")
+      } #drop_vars
+
     } else {
-      parameters['drop_vars'] <- paste(drop_vars, collapse = ", ")
-    } #drop_vars
+
+      parameters[['drop_vars']] <- list()
+
+      # Loop through drop_vars to concatenate names and values
+      for (i in seq_along(drop_vars)) {
+        parameters[['drop_vars']][[names(drop_vars)[i]]] <- paste(drop_vars[[i]], collapse = ", ")
+      }
+
+
+
+
+    } #Drop Vars - List vs. Identified
+
 
     if (is.na(ml[1])){
       parameters['ml_model'] <- 'rf'
@@ -140,19 +166,35 @@ pai_main <- function(data,
       parameters['data_type'] = 'Binomial'
     } else {
       parameters['data_type'] = 'Continuous'
-    }
+    } #Data Type
 
     if (custom_tc == FALSE){
       parameters['custom_tc'] <- 'FALSE'
     } else {
       parameters['custom_tc'] <- 'TRUE'
-    }
+    } #Custom Train Control
 
     if (is.null(seed)){
       parameters['seed'] <- 1234
     } else {
       parameters['seed'] <- as.numeric(seed)
-    }
+    } #Custom Seed
+
+    {
+      drop_vars_to_print <- c()
+      if(parameters$list_drop_vars == 'TRUE'){
+        for (i in 1:length(parameters$drop_vars)){
+          temp_drop_var_list <- parameters$drop_vars[i]
+          temp_drop_var_list <- paste0("\n          ", names(temp_drop_var_list)[1], ": ", temp_drop_var_list)
+          drop_vars_to_print <- paste(drop_vars_to_print, temp_drop_var_list, sep = " ")
+        }
+      } else {
+
+        drop_vars_to_print <-  parameters$drop_vars
+
+      }
+
+    } #Special Drop Vars Message
 
     message(
       "    Dependent Variable = ", parameters$outcome, "\n",
@@ -161,7 +203,7 @@ pai_main <- function(data,
       "    Factor Terms = ", paste(unlist(parameters$factors), collapse = ", "), "\n",
       "    Automatically Assign Factors = ", ifelse(parameters$assign_factors == 'TRUE', paste0('TRUE, Level Cut-Off = ', parameters$factor_cutoff), 'FALSE'), "\n",
       "    Interactions = ", parameters$interactions, "\n",
-      "    Variables to Iteratively Drop = ", parameters$drop_vars, "\n",
+      "    Drop Vars List = ", drop_vars_to_print, "\n",
       "    Custom Train Control = ", parameters$custom_tc, "\n",
       "    Seed = ", parameters$seed, "\n",
       '    ML Parameters:', "\n",
@@ -315,28 +357,70 @@ pai_main <- function(data,
       message("    Beginning Placebo Protocol...")
 
       placebos <- data.frame() # Initialize Empty DF
-      vars <- combined_variables_list
-      original_predictions <- predict(w, d.test, na.action = na.pass) #Original Predictions from Mod.With
 
-      for (rep in 1:as.numeric(parameters$placebo_iterations)) {
-        for (variable in vars) {
+      if (parameters$list_drop_vars == TRUE){
 
-          shuffle_data <- d.test
-          shuffle_data[[variable]] <- sample(shuffle_data[[variable]]) # Shuffle the variable
 
-          shuffled_predictions <- predict(w, newdata = shuffle_data, na.action = na.pass) # Predict using the shuffled data
+        vars <- unlist(combined_variables_list)
+        original_predictions <- predict(w, d.test, na.action = na.pass) #Original Predictions from Mod.With
 
-          accuracy_change <- mean(original_predictions != shuffled_predictions) # Calculate accuracy change
+        for (rep in 1:as.numeric(parameters$placebo_iterations)){
 
-          placebo_temp <- data.frame(rep_count = rep, variable = variable, accuracy_change = accuracy_change) # Store the accuracy change
-          placebos <- bind_rows(placebos, placebo_temp)
+          for (var_list in 1:length(vars)){
+            temp_vars_list <- vars[var_list]
+            temp_vars_list <- unique(unlist(str_split(temp_vars_list, pattern = ", ")))
+            shuffle_data <- d.test
+            cols_to_shuffle <- names(shuffle_data)[names(shuffle_data) %in% temp_vars_list]
+
+            for (col in 1:length(cols_to_shuffle)){
+              temp_shuffle_col <- cols_to_shuffle[col]
+              shuffle_data[,temp_shuffle_col] <- sample(shuffle_data[,temp_shuffle_col])
+            }
+
+            shuffled_predictions <- predict(w, newdata = shuffle_data, na.action = na.pass) # Predict using the shuffled data
+
+            accuracy_change <- mean(original_predictions != shuffled_predictions) # Calculate accuracy change
+
+            placebo_temp <- data.frame(rep_count = rep, variable = names(vars)[var_list], accuracy_change = accuracy_change) # Store the accuracy change
+            placebos <- bind_rows(placebos, placebo_temp)
+
+          }
+
+          if (rep %% 5 == 0) {
+            cat(paste0('           Completed Placebo Shuffling Iteration ', rep, '\n'))
+          }
+
         }
 
-        if (rep %% 5 == 0) {
-          cat(paste0('           Completed Placebo Shuffling Iteration ', rep, '\n'))
-        }
+      } else {
 
-      }
+        vars <- combined_variables_list
+        original_predictions <- predict(w, d.test, na.action = na.pass) #Original Predictions from Mod.With
+
+        for (rep in 1:as.numeric(parameters$placebo_iterations)) {
+          for (variable in vars) {
+
+            shuffle_data <- d.test
+            shuffle_data[[variable]] <- sample(shuffle_data[[variable]]) # Shuffle the variable
+
+            shuffled_predictions <- predict(w, newdata = shuffle_data, na.action = na.pass) # Predict using the shuffled data
+
+            accuracy_change <- mean(original_predictions != shuffled_predictions) # Calculate accuracy change
+
+            placebo_temp <- data.frame(rep_count = rep, variable = variable, accuracy_change = accuracy_change) # Store the accuracy change
+            placebos <- bind_rows(placebos, placebo_temp)
+          }
+
+          if (rep %% 5 == 0) {
+            cat(paste0('           Completed Placebo Shuffling Iteration ', rep, '\n'))
+          }
+
+        } #End Placebo Protocol
+
+
+
+      } #Drop Var List Exception
+
 
 
       return(placebos)
@@ -349,75 +433,116 @@ pai_main <- function(data,
 
       fit_change <- data.frame() #Initialize Empty DF for Fit Changes by Drop Var
 
-      if (is.null(parameters$drop_vars)){
-        drop <- combined_variables_list
-      } else if (parameters$drop == 'All Predictors'){
-        drop <- combined_variables_list
+
+      if (parameters$list_drop_vars == 'TRUE'){
+
+        drop <- unlist(combined_variables_list)
+
+        for (drop_var in 1:length(drop)){
+          temp_vars_list <- unique(unlist(str_split(drop[drop_var], pattern = ", ")))
+          temp_vars_list <- c(temp_vars_list, paste0('as.factor(', temp_vars_list, ')'))
+          temp_new_formula <- reformulate(setdiff(all.vars(formula), c(temp_vars_list, "y")), response = ifelse(parameters$data_type == 'Binomial', 'as.factor(y)', 'y'))
+
+          capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings( train(form = as.formula(temp_new_formula),
+                                                                                                        data = d.test,
+                                                                                                        metric = ifelse(parameters$data_type == 'Continuous', 'RMSE', 'Accuracy'),
+                                                                                                        method = as.character(parameters$ml_model),
+                                                                                                        trControl = tc_main))})
+          if (data_type == 'Continuous'){
+            fit_drop_var <- mean(mod.without_var$results$RMSE)
+            fit_original <- mean(mod.with$results$RMSE)
+          } else {
+            fit_drop_var <- mean(mod.without_var$results$Accuracy)
+            fit_original <- mean(mod.with$results$Accuracy)
+          } # Get Fit -- Exception by Data Type
+
+
+          change_temp <- data.frame(var = names(drop)[drop_var],
+                                    fit_change = (fit_original - fit_drop_var)) #Get Temp Frame for Fit Change
+          fit_change <- bind_rows(fit_change, change_temp) #Append to fit_change
+
+          cat(paste0('           Completed Var List: ', names(drop)[drop_var], '\n'))
+
+
+        }
+
+
+
       } else {
-        drop <- unique(parameters$drop_vars)
-      } #Declare Dropvars by DropVar Type
 
-      generate_combinations_df <- function(drop) {
-
-        combinations <- list()
-
-        for (d in 1:length(drop)){
-          other_predictors <- combined_variables_list[!combined_variables_list %in% c(drop[d], paste0('as.factor(', drop[d], ')'))]
-          combinations[[paste('Combination_', d)]] <- data.frame(combination = paste(other_predictors, collapse = ", "), dropped = drop[d])
-        } #Create List of Combinations -- Dropping 1 Var Each Time from drop_vars (drop)
-
-        combinations <- do.call(rbind, combinations) #Combine Into Single DF
-
-        return(combinations)
-      } #Generate DropVar Combinations
-
-      combinations <- generate_combinations_df(drop)  #Run generation_combinations_df
-
-      drop_combinations <- data.frame() #Initialize Empty DF for Drop Variables Output
-
-      for (i in 1:nrow(combinations)){
-        temp_combination <- gsub('\\,', ' + ', combinations$combination[i])
-
-        if (data_type == 'Continuous'){
-          temp_combination <- paste0('y ~ ', temp_combination)
+        if (is.null(parameters$drop_vars)){
+          drop <- combined_variables_list
+        } else if (parameters$drop == 'All Predictors'){
+          drop <- combined_variables_list
         } else {
-          temp_combination <- paste0('as.factor(y) ~ ', temp_combination)
-        } #Create Function Text - Exception for Data Type
+          drop <- unique(parameters$drop_vars)
+        } #Declare Dropvars by DropVar Type
 
-        dropped_var <- combinations$dropped[i] #Get Dropped Var
+        generate_combinations_df <- function(drop) {
 
-        drop_combinations <- bind_rows(drop_combinations, data.frame(combination = temp_combination,
-                                                                     dropped_var = dropped_var))
-      } #Convert Drop Combinations to Formula Structure
+          combinations <- list()
 
-      for (c in 1:nrow(drop_combinations)){
+          for (d in 1:length(drop)){
+            other_predictors <- combined_variables_list[!combined_variables_list %in% c(drop[d], paste0('as.factor(', drop[d], ')'))]
+            combinations[[paste('Combination_', d)]] <- data.frame(combination = paste(other_predictors, collapse = ", "), dropped = drop[d])
+          } #Create List of Combinations -- Dropping 1 Var Each Time from drop_vars (drop)
 
-        combination = drop_combinations$combination[c]
-        dropped_var = drop_combinations$dropped_var[c]
+          combinations <- do.call(rbind, combinations) #Combine Into Single DF
 
-        capture_output_mod.with <- capture.output({ mod.without_var <- suppressWarnings( train(form = as.formula(combination),
-                                                                                               data = d.test,
-                                                                                               metric = ifelse(parameters$data_type == 'Continuous', 'RMSE', 'Accuracy'),
-                                                                                               method = as.character(parameters$ml_model),
-                                                                                               trControl = tc_main)
-        )})
+          return(combinations)
+        } #Generate DropVar Combinations
 
-        if (data_type == 'Continuous'){
-          fit_drop_var <- mean(mod.without_var$results$RMSE)
-          fit_original <- mean(mod.with$results$RMSE)
-        } else {
-          fit_drop_var <- mean(mod.without_var$results$Accuracy)
-          fit_original <- mean(mod.with$results$Accuracy)
-        } # Get Fit -- Exception by Data Type
+        combinations <- generate_combinations_df(drop)  #Run generation_combinations_df
 
-        change_temp <- data.frame(var = dropped_var,
-                                  fit_change = (fit_original - fit_drop_var)) #Get Temp Frame for Fit Change
+        drop_combinations <- data.frame() #Initialize Empty DF for Drop Variables Output
 
-        fit_change <- bind_rows(fit_change, change_temp) #Append to fit_change
+        for (i in 1:nrow(combinations)){
+          temp_combination <- gsub('\\,', ' + ', combinations$combination[i])
 
-        cat(paste0('           Completed Var: ', dropped_var, '\n'))
+          if (data_type == 'Continuous'){
+            temp_combination <- paste0('y ~ ', temp_combination)
+          } else {
+            temp_combination <- paste0('as.factor(y) ~ ', temp_combination)
+          } #Create Function Text - Exception for Data Type
 
+          dropped_var <- combinations$dropped[i] #Get Dropped Var
+
+          drop_combinations <- bind_rows(drop_combinations, data.frame(combination = temp_combination,
+                                                                       dropped_var = dropped_var))
+        } #Convert Drop Combinations to Formula Structure
+
+        for (c in 1:nrow(drop_combinations)){
+
+          combination = drop_combinations$combination[c]
+          dropped_var = drop_combinations$dropped_var[c]
+
+          capture_output_mod.with <- capture.output({ mod.without_var <- suppressWarnings( train(form = as.formula(combination),
+                                                                                                 data = d.test,
+                                                                                                 metric = ifelse(parameters$data_type == 'Continuous', 'RMSE', 'Accuracy'),
+                                                                                                 method = as.character(parameters$ml_model),
+                                                                                                 trControl = tc_main)
+          )})
+
+          if (data_type == 'Continuous'){
+            fit_drop_var <- mean(mod.without_var$results$RMSE)
+            fit_original <- mean(mod.with$results$RMSE)
+          } else {
+            fit_drop_var <- mean(mod.without_var$results$Accuracy)
+            fit_original <- mean(mod.with$results$Accuracy)
+          } # Get Fit -- Exception by Data Type
+
+          change_temp <- data.frame(var = dropped_var,
+                                    fit_change = (fit_original - fit_drop_var)) #Get Temp Frame for Fit Change
+
+          fit_change <- bind_rows(fit_change, change_temp) #Append to fit_change
+
+          cat(paste0('           Completed Var: ', dropped_var, '\n'))
+
+        }
       }
+
+
+
 
       return(fit_change) #Return Full DF When Done
 
@@ -454,7 +579,7 @@ pai_main <- function(data,
         }
 
         if (length(single_level_cols) > 0){
-          message("           Note -- Removing Following Vars Due to Insufficient Levels in Test/Training Data: ", paste(single_level_cols, collapse = ", "))
+          message("         Note -- Removing Following Vars Due to Insufficient Levels in Test/Training Data: ", paste(single_level_cols, collapse = ", "))
 
         }
 
@@ -586,7 +711,11 @@ pai_main <- function(data,
         )
       }) #Get Basic RF
 
-      placebo_base <- placebo_shuffle(mod.with, d.train, d.test, combined_vars) #Initialize Placebo_Shuffle
+      placebo_base <- placebo_shuffle(w = mod.with,
+                                      d.train = d.train,
+                                      d.test = d.test,
+                                      combined_variables_list = ifelse(parameters$list_drop_vars == 'TRUE', list(parameters$drop_vars), combined_vars)) #Initialize Placebo_Shuffle
+
       placebo <- placebo_base %>%
         select(-rep_count) %>%
         rename(var = variable) %>%
@@ -594,13 +723,17 @@ pai_main <- function(data,
         summarize(min_change = quantile(accuracy_change, 0.025),
                   max_change = quantile(accuracy_change, 0.975)) #Post Process Placebo_Shuffle
 
-      fit_change <- dropping_vars(mod.with, d.test, combined_vars) #Initialize Dropping_Vars
+      fit_change <- dropping_vars(mod.with = mod.with,
+                                  d.test = d.test,
+                                  combined_variables_list = ifelse(parameters$list_drop_vars == 'TRUE', list(parameters$drop_vars), combined_vars)) #Initialize Dropping_Vars
+
+
       fit_assess <- left_join(fit_change, placebo, by = 'var') #Join Fit Changes by Dropped Var ('var')
 
       output_list <- list(
         input_parameters = parameters,
         with = mod.with,
-        rf.basic = rf.basic,
+        #rf.basic = rf.basic,
         X = full_dat,
         with.test = d.test,
         with.train = d.train,
@@ -624,19 +757,19 @@ pai_main <- function(data,
   pai_output <- pai_ml(y = outcome_var, full_dat = dat, ntrain = train.set) #Initialize Core Functions
 
   end_time <- Sys.time()
-  difference_time = end_time-start_time
+  completion_time_seconds <- difftime(end_time, start_time, units = "secs")
+  completion_time_minutes <- as.numeric(completion_time_seconds) / 60
 
   message("-------------------------------------------------------------------")
   cat("-------------------------- PAI  Complete --------------------------\n")
   message("-------------------------------------------------------------------")
-  message('Completion Time = ', round((difference_time/60), 2), ' Minutes')
+  message('Completion Time = ', completion_time_minutes, ' Minutes')
 
   return(pai_output)
 
 
 
 }
-
 
 ########################
 #Test Run
@@ -648,15 +781,39 @@ with.dat <- perms[[1]][[1]]
 
 ########################
 
+df <- with.dat
+mood <- names(df)[grepl('mood', names(df))]
+issues <- c('issueArea', "issuecluster", "issueFactor",
+            "iA.2", "iA.1", "iA.7", "iA.8", "adminAction", "adminActionState")
+issues <- issues[issues %in% names(df)]
+amicis <- c("amaff", "amrev", 'totam', 'wlf', 'chamber', 'sg', 'aclu')
+amicis <- amicis[amicis %in% names(df)]
+ideo <- c('scmed', 'mqmed', 'mqmean')
+ideo <- ideo[ideo %in% names(df)]
+lc <- names(df)[grep('lcD', names(df))]
+jr <- names(df)[grep('judRev', names(df))]
+lats <- names(df)[grep('lat', names(df))]
+sals <- unique(c(grep('salience', names(df)), grep('CLR', names(df)), grep('sal.', names(df)), grep('Sal.', names(df))))
+
+
 WOD_test <- pai_main(data = with.dat,
-                 outcome = 'direction',
-                 predictors = c('term', 'issueArea', 'iA.8', 'iA.7', 'iA.2', 'iA.1'),
-                 factors = NULL,
-                 assign_factors = c(TRUE, 4),
-                 interactions = NULL,
-                 drop_vars = NULL,
-                 ml = c('parRF', 8, 100, 10),
-                 seed = 1234)
+                     outcome = 'direction',
+                     predictors = c(mood, issues, amicis, ideo, lc, jr, lats),
+                     factors = NULL,
+                     assign_factors = c(TRUE, 4),
+                     interactions = NULL,
+                     list_drop_vars = TRUE,
+                     drop_vars = list(Mood = mood,
+                                      Issue = issues,
+                                      Amici = amicis,
+                                      Ideology = ideo,
+                                      `Lower Court` = lc,
+                                      `Judicial Review` = jr,
+                                      Lateral = lats),
+                     ml = c('parRF', 8, 5, 5),
+                     custom_tc = F,
+                     seed = 1234)
+
 
 
 ################################################################################
@@ -667,7 +824,6 @@ WOD_test <- pai_main(data = with.dat,
 # rolling_extended = by_bin + bin_cut:max_bin
 # placebo = placebo iterations
 ################################################################################
-
 
 pai_diagnostic <- function(pai_object = NULL,
                            variables = NULL,
@@ -743,7 +899,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
     data <- pai_object$push
 
-    for (var in variables){
+    for (var in names(data)){
 
       var <- gsub('as\\.factor\\(', '', gsub('\\)', '', var))
 
@@ -865,7 +1021,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
     data <- pai_object$push
 
-    for (var in variables){
+    for (var in names(data)){
 
       var <- gsub('as\\.factor\\(', '', gsub('\\)', '', var))
 
@@ -1020,7 +1176,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
     data <- pai_object$push
 
-    for (var in variables){
+    for (var in names(data)){
 
       var <- gsub('as\\.factor\\(', '', gsub('\\)', '', var))
 
@@ -1214,7 +1370,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
     data <- pai_object$push
 
-    for (var in variables){
+    for (var in names(data)){
 
       var <- gsub('as\\.factor\\(', '', gsub('\\)', '', var))
 
@@ -1404,7 +1560,7 @@ pai_diagnostic <- function(pai_object = NULL,
 
     diagnostic_list$combined_diagnostics <- list()
 
-    for (var in variables){
+    for (var in names(data)){
 
       var <- gsub('as\\.factor\\(', '', gsub('\\)', '', var))
 
@@ -1436,3 +1592,4 @@ c <- pai_diagnostic(pai_object = WOD_test,
                     variables = NULL,
                     bin_cut = NULL)
 
+c$c
