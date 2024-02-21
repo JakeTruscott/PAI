@@ -9,7 +9,7 @@
 ################################################################################
 #Load Packages
 ################################################################################
-library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork); library(stringr); library(cowplot)
+library(randomForest); library(doParallel); library(caret); library(parallel); library(rlist); library(dplyr); library(gridExtra); library(gridtext); library(grid); library(doSNOW); library(patchwork); library(stringr); library(cowplot); library(xgboost)
 
 
 ################################################################################
@@ -319,7 +319,9 @@ pai_main <- function(data,
 
     } #runpred
 
-    push <- function(l, combined_variables_list){
+    push <- function(output_list){
+
+      combined_variables_list <- unique(output_list$var)
 
       message("    Beginning Push Protocol...")
 
@@ -329,11 +331,12 @@ pai_main <- function(data,
       factor_vars <- gsub('as\\.factor\\(', '', gsub('\\)', '', factor_vars))
       all_vars <- gsub('as\\.factor\\(', '', gsub('\\)', '', combined_variables_list))
 
-      for (variable in 1:length(names(l$with.test))){
-        x = names(l$with.test)[variable]
-        Z = l$with.test
-
-        if (x %in% factor_vars || x == 'y' || is.factor(Z[,x])){
+      for (variable in 1:length(combined_variables_list)){
+        x = combined_variables_list[variable]
+        Z = output_list$with.test
+        print(x)
+        if (x %in% paste0('as.factor(', factor_vars, ')') || x == 'y' || is.factor(Z[,x])){
+          print('Skipping')
           next
         }  else{
           sdx <- sd(Z[,x])
@@ -341,7 +344,7 @@ pai_main <- function(data,
         }
 
 
-        tester <- lapply(steps, function(z) runpred(l$with, x, z, Z ))
+        tester <- lapply(steps, function(z) runpred(output_list$with, x, z, Z ))
         runpred_output <- cbind(steps, t(list.cbind(tester)))
         push_output[[x]] <- runpred_output
 
@@ -360,9 +363,11 @@ pai_main <- function(data,
 
       if (parameters$list_drop_vars == TRUE){
 
+        set.seed(parameters$seed)
 
         vars <- unlist(combined_variables_list)
         original_predictions <- predict(w, d.test, na.action = na.pass) #Original Predictions from Mod.With
+        original_accuracy <- mean(original_predictions == d.test$y)
 
         for (rep in 1:as.numeric(parameters$placebo_iterations)){
 
@@ -379,7 +384,9 @@ pai_main <- function(data,
 
             shuffled_predictions <- predict(w, newdata = shuffle_data, na.action = na.pass) # Predict using the shuffled data
 
-            accuracy_change <- mean(original_predictions != shuffled_predictions) # Calculate accuracy change
+            shuffled_accuracy <- mean(shuffled_predictions == d.test$y)
+
+            accuracy_change <- shuffled_accuracy - original_accuracy # Calculate accuracy change
 
             placebo_temp <- data.frame(rep_count = rep, variable = names(vars)[var_list], accuracy_change = accuracy_change) # Store the accuracy change
             placebos <- bind_rows(placebos, placebo_temp)
@@ -427,7 +434,7 @@ pai_main <- function(data,
 
     }
 
-    dropping_vars <- function(mod.with, d.test, combined_variables_list){
+    dropping_vars <- function(mod.with, d.train, combined_variables_list){
 
       message("    Beginning Variable Omission Protocol...")
 
@@ -439,12 +446,103 @@ pai_main <- function(data,
         drop <- unlist(combined_variables_list)
 
         for (drop_var in 1:length(drop)){
-          temp_vars_list <- unique(unlist(str_split(drop[drop_var], pattern = ", ")))
-          temp_vars_list <- c(temp_vars_list, paste0('as.factor(', temp_vars_list, ')'))
-          temp_new_formula <- reformulate(setdiff(all.vars(formula), c(temp_vars_list, "y")), response = ifelse(parameters$data_type == 'Binomial', 'as.factor(y)', 'y'))
+
+          vars_to_drop <- unique(unlist(str_split(drop[drop_var], pattern = ", ")))
+          vars_to_drop <- c(vars_to_drop, paste0('as.factor(', vars_to_drop, ')'))
+
+          {
+
+            {
+
+              variables = names(d.train)[!names(d.train) %in% 'y']
+              factor_terms <- c()
+              declared_factors <- c()
+              assigned_factors <- c()
+
+              {
+                if (parameters$factors[1] == 'None'){
+                  declared_factor_terms <- NULL
+                } else{
+
+                  for (i in 1:length(parameters$factors)){
+                    declared_factors[i] <- paste0('as.factor(', parameters$factors[i], ')')
+                  }
+
+                }
+              } #Introduce Declared Factors (If Any)
+
+              {
+                remaining_vars <- names(d.train)[!names(d.train) %in% 'y']
+                remaining_vars <- remaining_vars[!remaining_vars %in% unique(parameters$factors)]
+                remaining_vars <- remaining_vars[!grepl('\\:', remaining_vars)]
+
+                if (parameters$assign_factors[1] == 'FALSE'){ #If Assign_Factors = FALSE - Skip
+                  assigned_factors <- remaining_vars
+                } else {
+
+                  for (i in 1:length(remaining_vars)){
+                    temp_var <- remaining_vars[i] #Get Var
+                    temp_col <- d.train[temp_var][,1] #Subset Data by Var
+
+                    if (is.character(temp_col)){
+                      assigned_factors[i] <- paste0('as.factor(', temp_var, ')') #If Character - Assign to Factor
+                    } else if (length(unique(temp_col)) < as.numeric(parameters$factor_cutoff)) {
+                      assigned_factors[i] <- paste0('as.factor(', temp_var, ')') #If Unique Values < Assigned Factor Cutoff -- Assign to Factor
+                    } else {
+                      assigned_factors[i] <- temp_var #If Not Factor - Return as Simple Var
+                    }
+
+                  }
+
+                }
+
+              } #Auto Assign Factors (If TRUE)
+
+              combined_vars <- c()
+
+              if (!is.null(declared_factors)) {
+                combined_vars <- c(combined_vars, unlist(declared_factors))
+              }
+              if (!is.null(assigned_factors)) {
+                combined_vars <- c(combined_vars, unlist(assigned_factors))
+              }
+              if (!is.null(declared_interactions)) {
+                interaction_terms <- c()
+                for (i in 1:length(declared_interactions)){
+                  terms <- unlist(stringr::str_split(declared_interactions[i], pattern = "\\:"))
+                  factor_check <- c()
+                  for (t in 1:length(terms)){
+                    temp_term <- terms[t]
+                    factor_check[t] <- ifelse(paste0('as.factor(', temp_term, ')') %in% combined_vars, paste0('as.factor(', temp_term, ')'), temp_term)
+                  }
+                  interaction_terms <- c(interaction_terms, paste(factor_check, collapse = ":"))
+                }
+
+                combined_vars <- c(combined_vars, interaction_terms)
+              }
+
+              combined_vars <- unique(combined_vars)
+
+
+              combined_vars <- combined_vars[!combined_vars %in% vars_to_drop]
+
+              if(data_type == 'Binomial'){
+                new_formula = paste0('as.factor(y) ~ ', paste(combined_vars, collapse = " + "))
+                new_formula = as.formula(new_formula)
+              } else {
+                new_formula = paste0('y ~ ', paste(combined_vars, collapse = " + "))
+                new_formula = as.formula(new_formula)
+              }
+
+
+            }  #Compile Formula for ML
+
+          } #Create New Formula
+
+          temp_new_formula <- new_formula
 
           capture_output_mod.without_var <- capture.output({ mod.without_var <- suppressWarnings( train(form = as.formula(temp_new_formula),
-                                                                                                        data = d.test,
+                                                                                                        data = d.train,
                                                                                                         metric = ifelse(parameters$data_type == 'Continuous', 'RMSE', 'Accuracy'),
                                                                                                         method = as.character(parameters$ml_model),
                                                                                                         trControl = tc_main))})
@@ -673,6 +771,7 @@ pai_main <- function(data,
           formula = as.formula(formula)
         }
 
+        list_of_vars <- combined_vars
 
       }  #Compile Formula for ML
 
@@ -724,7 +823,7 @@ pai_main <- function(data,
                   max_change = quantile(accuracy_change, 0.975)) #Post Process Placebo_Shuffle
 
       fit_change <- dropping_vars(mod.with = mod.with,
-                                  d.test = d.test,
+                                  d.train = d.train,
                                   combined_variables_list = ifelse(parameters$list_drop_vars == 'TRUE', list(parameters$drop_vars), combined_vars)) #Initialize Dropping_Vars
 
 
@@ -733,15 +832,15 @@ pai_main <- function(data,
       output_list <- list(
         input_parameters = parameters,
         with = mod.with,
-        #rf.basic = rf.basic,
+        rf.basic = rf.basic,
         X = full_dat,
         with.test = d.test,
         with.train = d.train,
-        var = unique(fit_assess$var),
+        var = list_of_vars,
         drop_acc.ch = fit_assess,
         placebo = placebo) #Compile All Into Single List Object
 
-      pusher <- push(output_list, combined_vars) #Initialize push
+      pusher <- push(output_list) #Initialize push
       output_list$push = pusher #Put push output in output_list
 
       return(output_list)
@@ -798,7 +897,7 @@ sals <- unique(c(grep('salience', names(df)), grep('CLR', names(df)), grep('sal.
 
 WOD_test <- pai_main(data = with.dat,
                      outcome = 'direction',
-                     predictors = c(mood, issues, amicis, ideo, lc, jr, lats),
+                     predictors = NULL,
                      factors = NULL,
                      assign_factors = c(TRUE, 4),
                      interactions = NULL,
@@ -810,10 +909,11 @@ WOD_test <- pai_main(data = with.dat,
                                       `Lower Court` = lc,
                                       `Judicial Review` = jr,
                                       Lateral = lats),
-                     ml = c('parRF', 8, 5, 5),
+                     ml = c('xgbTree', 8, 100, 5),
                      custom_tc = F,
                      seed = 1234)
 
+save(WOD_test, file = 'WOD_test_xgbTree.rdata')
 
 
 ################################################################################
@@ -1592,4 +1692,4 @@ c <- pai_diagnostic(pai_object = WOD_test,
                     variables = NULL,
                     bin_cut = NULL)
 
-c$c
+c$combined_diagnostics$issuemood
